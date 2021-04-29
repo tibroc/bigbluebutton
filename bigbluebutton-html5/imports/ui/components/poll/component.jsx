@@ -6,6 +6,7 @@ import _ from 'lodash';
 import { Session } from 'meteor/session';
 import cx from 'classnames';
 import Button from '/imports/ui/components/button/component';
+import Toggle from '/imports/ui/components/switch/component';
 import LiveResult from './live-result/component';
 import { styles } from './styles.scss';
 import DragAndDrop from './dragAndDrop/component';
@@ -103,6 +104,10 @@ const intlMessages = defineMessages({
     id: 'app.poll.start.label',
     description: '',
   },
+  secretPollLabel: {
+    id: 'app.poll.secretPoll.label',
+    description: '',
+  },
   questionTitle: {
     id: 'app.poll.question.title',
     description: '',
@@ -171,6 +176,7 @@ class Poll extends Component {
       question: '',
       optList: [],
       error: null,
+      secretPoll: false,
     };
 
     this.handleBackClick = this.handleBackClick.bind(this);
@@ -257,6 +263,11 @@ class Poll extends Component {
   handleAddOption() {
     const { optList } = this.state;
     this.setState({ optList: [...optList, { val: '' }] });
+  }
+
+  handleToggle() {
+    const toggledValue = !this.state.secretPoll;
+    this.setState({ secretPoll: toggledValue});
   }
 
   setOptListLength(len) {
@@ -393,6 +404,7 @@ class Poll extends Component {
             isMeteorConnected,
             stopPoll,
             currentPoll,
+            secretPoll: this.state.secretPoll,
             pollAnswerIds,
             usernames,
           }}
@@ -526,6 +538,23 @@ class Poll extends Component {
                           onClick={() => this.handleAddOption()}
                         />
                       )}
+                    <div className={styles.row}>
+                      <div className={styles.col} aria-hidden="true">
+                          <label className={styles.label}>
+                            {intl.formatMessage(intlMessages.secretPollLabel)}
+                          </label>
+                      </div>
+                      <div className={styles.col}>
+                        <label className={styles.toggle}>
+                          <Toggle
+                            icons={false}
+                            defaultChecked={this.state.secretPoll}
+                            onChange={() => this.handleToggle()}
+                            ariaLabel={intl.formatMessage(intlMessages.secretPollLabel)}
+                          />
+                        </label>
+                      </div>
+                    </div>
                     <Button
                       className={styles.startPollBtn}
                       data-test="startPoll"

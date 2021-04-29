@@ -247,6 +247,7 @@
     "app.poll.addItem.label" : "Add item",
     "app.poll.question.title": "Ask a question",
     "app.poll.start.label" : "Start Poll",
+    "app.poll.secretPoll.label" : "Secret Poll",
     "app.poll.questionErr": "Enter a question",
     "app.poll.optionErr": "Enter a Poll option",
     "app.poll.t": "True",
