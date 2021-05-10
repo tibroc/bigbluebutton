@@ -14,6 +14,9 @@ const intlMessages = defineMessages({
   pollingTitleLabel: {
     id: 'app.polling.pollingTitle',
   },
+  secretPollingTitleLabel: {
+    id: 'app.polling.secretPollingTitle',
+  },
   pollAnswerLabel: {
     id: 'app.polling.pollAnswerLabel',
   },
@@ -134,9 +137,15 @@ class Polling extends Component {
                 {
                   question.length === 0
                   && (
-                    <div className={styles.pollingTitle}>
-                      {intl.formatMessage(intlMessages.pollingTitleLabel)}
-                    </div>
+                    poll.secretPoll ? (
+                      <div className={styles.secretPollingTitle}>
+                        {intl.formatMessage(intlMessages.secretPollingTitleLabel)}
+                      </div>
+                    ) : (
+                      <div className={styles.pollingTitle}>
+                        {intl.formatMessage(intlMessages.pollingTitleLabel)}
+                      </div>
+                    )
                   )
                 }
                 <div className={cx(pollAnswerStyles)}>

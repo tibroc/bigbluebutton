@@ -416,7 +416,7 @@ class Poll extends Component {
 
   renderPollOptions() {
     const {
-      type, optList, question, error,
+      type, secretPoll, optList, question, error,
     } = this.state;
     const { startPoll, startCustomPoll, intl } = this.props;
     const defaultPoll = type === 'TF' || type === 'A-' || type === 'YNA';
@@ -548,7 +548,7 @@ class Poll extends Component {
                         <label className={styles.toggle}>
                           <Toggle
                             icons={false}
-                            defaultChecked={this.state.secretPoll}
+                            defaultChecked={secretPoll}
                             onChange={() => this.handleToggle()}
                             ariaLabel={intl.formatMessage(intlMessages.secretPollLabel)}
                           />
@@ -580,11 +580,12 @@ class Poll extends Component {
                           if (verifiedPollType === 'custom') {
                             startCustomPoll(
                               verifiedPollType,
+                              secretPoll,
                               question,
                               _.compact(verifiedOptions),
                             );
                           } else {
-                            startPoll(verifiedPollType, question);
+                            startPoll(verifiedPollType, secretPoll, question);
                           }
                         });
                       }}
