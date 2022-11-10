@@ -15,6 +15,8 @@ import { registerTitleView, unregisterTitleView } from '/imports/utils/dom-utils
 import Styled from './styles';
 import Settings from '/imports/ui/services/settings';
 import Checkbox from '/imports/ui/components/common/checkbox/component';
+import Header from '/imports/ui/components/common/control-header/component';
+import { ACTIONS, PANELS } from '/imports/ui/components/layout/enums';
 
 const { isMobile } = deviceInfo;
 
@@ -1148,6 +1150,7 @@ class PresentationUploader extends Component {
       isOpen,
       isPresenter,
       intl,
+      layoutContextDispatch,
       fileUploadConstraintsHint,
     } = this.props;
     if (!isPresenter) return null;
@@ -1161,45 +1164,80 @@ class PresentationUploader extends Component {
 
     return (<>
       <PresentationUploaderToast intl={intl} />
-      {isOpen ? (
-        <Styled.UploaderModal id="upload-modal">
-          <Styled.ModalInner>
-            <Styled.ModalHeader>
-              <h1>{intl.formatMessage(intlMessages.title)}</h1>
-              <Styled.ActionWrapper>
-                <Styled.DismissButton
-                  color="secondary"
-                  onClick={this.handleDismiss}
-                  label={intl.formatMessage(intlMessages.dismissLabel)}
-                  aria-describedby={intl.formatMessage(intlMessages.dismissDesc)}
-                />
-                <Styled.ConfirmButton
-                  data-test="confirmManagePresentation"
-                  color="primary"
-                  onClick={() => this.handleConfirm()}
-                  disabled={disableActions}
-                  label={hasNewUpload
-                    ? intl.formatMessage(intlMessages.uploadLabel)
-                    : intl.formatMessage(intlMessages.confirmLabel)}
-                />
-              </Styled.ActionWrapper>
-            </Styled.ModalHeader>
+      <Header
+        leftButtonProps={{
+          'aria-label': "back",
+          'data-test': "hidePollDesc",
+          label: "back",
+          onClick: () => {
+            layoutContextDispatch({
+              type: ACTIONS.SET_SIDEBAR_CONTENT_IS_OPEN,
+              value: false,
+            });
+            layoutContextDispatch({
+              type: ACTIONS.SET_SIDEBAR_CONTENT_PANEL,
+              value: PANELS.NONE,
+            });
+          },
+          ref: (node) => { this.hideBtn = node; },
+        }}
+        rightButtonProps={{
+          'aria-label': "back",
+          'data-test': "closePolling",
+          icon: "close",
+          label: "back",
+          onClick: () => {
+            //if (currentPoll) stopPoll();
+            layoutContextDispatch({
+              type: ACTIONS.SET_SIDEBAR_CONTENT_IS_OPEN,
+              value: false,
+            });
+            layoutContextDispatch({
+              type: ACTIONS.SET_SIDEBAR_CONTENT_PANEL,
+              value: PANELS.NONE,
+            });
+            Session.set('forcePresentationOpen', false);
+            // Session.set('pollInitiated', false);
+          },
+        }}
+      />
+      <Styled.UploaderModal id="upload-modal">
+        <Styled.ModalInner>
+          <Styled.ModalHeader>
+            <h1>{intl.formatMessage(intlMessages.title)}</h1>
+            <Styled.ActionWrapper>
+              <Styled.DismissButton
+                color="secondary"
+                onClick={this.handleDismiss}
+                label={intl.formatMessage(intlMessages.dismissLabel)}
+                aria-describedby={intl.formatMessage(intlMessages.dismissDesc)}
+              />
+              <Styled.ConfirmButton
+                data-test="confirmManagePresentation"
+                color="primary"
+                onClick={() => this.handleConfirm()}
+                disabled={disableActions}
+                label={hasNewUpload
+                  ? intl.formatMessage(intlMessages.uploadLabel)
+                  : intl.formatMessage(intlMessages.confirmLabel)}
+              />
+            </Styled.ActionWrapper>
+          </Styled.ModalHeader>
 
-            <Styled.ModalHint>
-              {`${intl.formatMessage(intlMessages.message)}`}
-              {fileUploadConstraintsHint ? this.renderExtraHint() : null}
-            </Styled.ModalHint>
-              {this.renderPresentationList()}
-            <Styled.ExportHint>
-              {intl.formatMessage(intlMessages.exportHint)}
-            </Styled.ExportHint>
-            {isMobile ? this.renderPicDropzone() : null}
-            {this.renderDropzone()}
-            {this.renderExternalUpload()}
-          </Styled.ModalInner>
-        </Styled.UploaderModal>
-      ) : null
-    }</>)
+          <Styled.ModalHint>
+            {`${intl.formatMessage(intlMessages.message)}`}
+            {fileUploadConstraintsHint ? this.renderExtraHint() : null}
+          </Styled.ModalHint>
+            {this.renderPresentationList()}
+          <Styled.ExportHint>
+            {intl.formatMessage(intlMessages.exportHint)}
+          </Styled.ExportHint>
+          {isMobile ? this.renderPicDropzone() : null}
+          {this.renderDropzone()}
+          {this.renderExternalUpload()}
+        </Styled.ModalInner>
+      </Styled.UploaderModal>     
+    </>)
   }
 }
 

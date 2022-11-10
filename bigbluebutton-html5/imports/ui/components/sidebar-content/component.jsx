@@ -5,6 +5,7 @@ import { ACTIONS, PANELS } from '../layout/enums';
 import ChatContainer from '/imports/ui/components/chat/container';
 import NotesContainer from '/imports/ui/components/notes/container';
 import PollContainer from '/imports/ui/components/poll/container';
+import PresentationUploaderContainer from '/imports/ui/components/presentation/presentation-uploader/container';
 import CaptionsContainer from '/imports/ui/components/captions/container';
 import BreakoutRoomContainer from '/imports/ui/components/breakout-room/container';
 import WaitingUsersPanel from '/imports/ui/components/waiting-users/container';
@@ -86,6 +87,7 @@ const SidebarContent = (props) => {
 
   const smallSidebar = width < (maxWidth / 2);
   const pollDisplay = sidebarContentPanel === PANELS.POLL ? 'inherit' : 'none';
+  const presentationDisplay = sidebarContentPanel === PANELS.PRESENTATIONS ? 'inherit' : 'none';
 
   return (
     <Resizable
@@ -143,6 +145,9 @@ const SidebarContent = (props) => {
       {sidebarContentPanel === PANELS.WAITING_USERS && <WaitingUsersPanel />}
       <Styled.Poll style={{ minWidth, top: '0', display: pollDisplay }} id="pollPanel">
         <PollContainer smallSidebar={smallSidebar} amIPresenter={amIPresenter} />
+      </Styled.Poll>
+      <Styled.Poll style={{ minWidth, top: '0', display: presentationDisplay }} id="presentationPanel">
+        <PresentationUploaderContainer />
       </Styled.Poll>
     </Resizable>
   );

@@ -100,6 +100,7 @@ export const PANELS = {
   USERLIST: 'userlist',
   CHAT: 'chat',
   POLL: 'poll',
+  PRESENTATIONS: 'presentations',
   CAPTIONS: 'captions',
   BREAKOUT: 'breakoutroom',
   SHARED_NOTES: 'shared-notes',

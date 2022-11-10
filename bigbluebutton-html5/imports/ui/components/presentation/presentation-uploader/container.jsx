@@ -9,10 +9,12 @@ import PresentationUploader from './component';
 import { UsersContext } from '/imports/ui/components/components-data/users-context/context';
 import Auth from '/imports/ui/services/auth';
 import { isDownloadPresentationWithAnnotationsEnabled } from '/imports/ui/services/features';
+import { layoutDispatch } from '/imports/ui/components/layout/context';
 
 const PRESENTATION_CONFIG = Meteor.settings.public.presentation;
 
 const PresentationUploaderContainer = (props) => {
+  const layoutContextDispatch = layoutDispatch();
   const usingUsersContext = useContext(UsersContext);
   const { users } = usingUsersContext;
   const currentUser = users[Auth.meetingID][Auth.userID];
@@ -20,7 +22,7 @@ const PresentationUploaderContainer = (props) => {
 
   return userIsPresenter && (
     <ErrorBoundary Fallback={() => <FallbackModal />}>
-      <PresentationUploader isPresenter={userIsPresenter} {...props} />
+      <PresentationUploader isPresenter={userIsPresenter} {...{layoutContextDispatch, ...props}} />
     </ErrorBoundary>
   );
 };

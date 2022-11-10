@@ -161,7 +161,21 @@ class ActionsDropdown extends PureComponent {
         dataTest: "managePresentations",
         label: formatMessage(presentationLabel),
         key: this.presentationItemId,
-        onClick: handlePresentationClick,
+        //onClick: handlePresentationClick,
+        onClick: () => {
+          // if (Session.equals('pollInitiated', true)) {
+          //   Session.set('resetPollPanel', true);
+          // }
+          layoutContextDispatch({
+            type: ACTIONS.SET_SIDEBAR_CONTENT_IS_OPEN,
+            value: true,
+          });
+          layoutContextDispatch({
+            type: ACTIONS.SET_SIDEBAR_CONTENT_PANEL,
+            value: PANELS.PRESENTATIONS,
+          });
+          Session.set('forcePresentationOpen', true);
+        },
         dividerTop: this.props?.presentations?.length > 1 ? true : false,
       })
     }

@@ -381,7 +381,7 @@ const DropzoneLink = styled.span`
 
 const UploaderModal = styled.div`
   background-color: white;
-  position: fixed;
+  position: none;
   top: 0;
   left: 0;
   right: 0;

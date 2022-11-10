@@ -7,6 +7,7 @@ import UserNotesContainer from './user-notes/container';
 import UserCaptionsContainer from './user-captions/container';
 import WaitingUsersContainer from './waiting-users/container';
 import UserPollsContainer from './user-polls/container';
+import PresentationsContainer from './presentations/container';
 import BreakoutRoomContainer from './breakout-room/container';
 import { isChatEnabled } from '/imports/ui/services/features';
 
@@ -39,6 +40,7 @@ class UserContent extends PureComponent {
             <WaitingUsersContainer {...{ pendingUsers }} />
           ) : null}
         <UserPollsContainer isPresenter={currentUser.presenter} />
+        <PresentationsContainer isPresenter={currentUser.presenter} />
         <BreakoutRoomContainer />
         <UserParticipantsContainer compact={compact}/>
       </Styled.Content>
