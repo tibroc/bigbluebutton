@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkbigbluebutton_docs=self.webpackChunkbigbluebutton_docs||[]).push([[121],{8070:e=>{e.exports=JSON.parse('[{"label":"Release notes","permalink":"/tags/release-notes","count":1},{"label":"Versions","permalink":"/tags/versions","count":1}]')}}]);
