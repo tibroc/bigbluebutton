@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkbigbluebutton_docs=self.webpackChunkbigbluebutton_docs||[]).push([[3993],{3769:u=>{u.exports=JSON.parse('{"name":"docusaurus-plugin-content-docs","id":"default"}')}}]);
