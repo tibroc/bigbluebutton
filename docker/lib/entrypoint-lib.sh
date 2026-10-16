@@ -4,9 +4,9 @@
 #
 # Sourced, never executed. Every entrypoint follows the same five steps:
 #
-#   validate  bbb_require / bbb_require_secret
+#   validate  bbb_require / bbb_require_secret / bbb_require_match
 #   derive    bbb_default, bbb_feature_enabled, plain bash
-#   render    bbb_render (envsubst) into bbb_path <bare-metal path>
+#   render    bbb_render (envsubst) or bbb_write_shell_vars into bbb_path <bare-metal path>
 #   merge     bbb_merge_yaml (yq) with the Tier 3 override file, if mounted
 #   exec      bbb_exec <command...>
 #
@@ -31,6 +31,15 @@ BBB_SECRET_PLACEHOLDERS=(changeme secret devkey LIVEKIT_KEY LIVEKIT_SECRET ClueC
 BBB_RENDER_ROOT=""
 BBB_ARGS=()
 
+# Internal: the yq binary, resolved from PATH on first use (never taken from the environment).
+_BBB_YQ=""
+
+# Bash sets these itself; most change on every expansion. A template must not use them:
+# the output would not be deterministic, or would describe the shell rather than the config.
+_BBB_SHELL_VARS=" BASHOPTS BASHPID BASH_ARGV0 BASH_COMMAND BASH_EXECUTION_STRING BASH_LINENO
+ BASH_SUBSHELL BASH_VERSION EPOCHREALTIME EPOCHSECONDS EUID GROUPS HISTCMD HOSTTYPE LINENO
+ MACHTYPE OPTARG OPTIND OSTYPE PIPESTATUS PPID RANDOM SECONDS SHELLOPTS SHLVL SRANDOM UID "
+
 # --- logging -----------------------------------------------------------------------------
 
 # Log to stderr. Callers pass variable names and file paths, never variable values.
@@ -44,8 +53,10 @@ bbb_die() {
     exit 1
 }
 
+# The offending string is not printed: a caller passing "$SECRET" instead of SECRET would
+# otherwise log the secret.
 _bbb_check_name() {
-    [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || bbb_die "invalid variable name: $1"
+    [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || bbb_die "invalid variable name passed to ${FUNCNAME[1]}"
 }
 
 # --- validate ----------------------------------------------------------------------------
@@ -71,6 +82,16 @@ bbb_require_secret() {
             fi
         done
     done
+}
+
+# bbb_require_match NAME ERE — NAME must be set and its whole value must match the extended
+# regular expression ERE (anchored at both ends by the helper).
+bbb_require_match() {
+    [ "$#" -eq 2 ] || bbb_die "usage: bbb_require_match NAME ERE"
+    _bbb_check_name "$1"
+    [ -n "${!1+set}" ] || bbb_die "variable $1 is not set"
+    local pattern="^($2)\$"
+    [[ "${!1}" =~ $pattern ]] || bbb_die "value of $1 does not have the expected format"
 }
 
 # --- derive ------------------------------------------------------------------------------
@@ -100,13 +121,16 @@ bbb_feature_enabled() {
 
 # bbb_init [--render-only DIR] [ARGS...] — select the mode. The remaining arguments are left
 # in the array BBB_ARGS, so an entrypoint can do:  bbb_init "$@"; set -- "${BBB_ARGS[@]}"
+# DIR is made absolute and normalized; it must not resolve to /.
 bbb_init() {
     BBB_RENDER_ROOT=""
     if [ "${1:-}" = "--render-only" ]; then
         [ -n "${2:-}" ] || bbb_die "--render-only needs a directory"
-        BBB_RENDER_ROOT="${2%/}"
-        [ -n "$BBB_RENDER_ROOT" ] || bbb_die "--render-only directory must not be /"
-        mkdir -p "$BBB_RENDER_ROOT" || bbb_die "cannot create render-only directory $BBB_RENDER_ROOT"
+        local root
+        root="$(realpath -m -- "$2")" || bbb_die "cannot resolve render-only directory"
+        [ "$root" != "/" ] || bbb_die "--render-only directory must not be /"
+        mkdir -p "$root" || bbb_die "cannot create render-only directory $root"
+        BBB_RENDER_ROOT="$root"
         shift 2
     fi
     BBB_ARGS=("$@")
@@ -118,48 +142,95 @@ bbb_is_render_only() {
 }
 
 # bbb_path ABSOLUTE_PATH — print where a config file goes: the path itself in normal mode,
-# the path below the render-only directory in render-only mode.
+# the path below the render-only directory in render-only mode. `..` components are refused,
+# so a path cannot leave the render-only directory.
 bbb_path() {
     [ "$#" -eq 1 ] || bbb_die "usage: bbb_path ABSOLUTE_PATH"
     case "$1" in
         /*) ;;
         *) bbb_die "bbb_path needs an absolute path: $1" ;;
     esac
+    case "/$1/" in
+        */../*) bbb_die "bbb_path does not accept '..' components: $1" ;;
+    esac
     printf '%s\n' "$BBB_RENDER_ROOT$1"
 }
+
+# --- writing files -----------------------------------------------------------------------
 
 _bbb_require_file() { # PATH DESCRIPTION
     if [ ! -f "$1" ] || [ ! -r "$1" ]; then bbb_die "$2 $1 not found or not readable"; fi
 }
 
-# _bbb_write DEST COMMAND [ARGS...] — write the command's stdout to DEST atomically: a
-# temporary file in the same directory, renamed only if the command succeeded. The file mode
-# follows the umask; entrypoints writing secrets set `umask 077` first.
+_bbb_check_dest() {
+    case "$1" in
+        "") bbb_die "${FUNCNAME[1]}: destination is empty (did bbb_path fail inside \$(...)?)" ;;
+        */) bbb_die "${FUNCNAME[1]}: destination $1 ends in /" ;;
+    esac
+    if [ -d "$1" ]; then bbb_die "${FUNCNAME[1]}: destination $1 is a directory"; fi
+}
+
+_bbb_check_mode() {
+    [[ "$1" =~ ^[0-7]{3,4}$ ]] || bbb_die "${FUNCNAME[1]}: --mode needs an octal mode such as 0600"
+}
+
+# _bbb_write DEST MODE COMMAND [ARGS...] — write the command's stdout to DEST atomically: a
+# mktemp file in the destination directory, renamed only if the command succeeded.
+# File mode: MODE if given; else the mode of an existing DEST (never widened); else the
+# umask default for new files (0666 minus umask).
 _bbb_write() {
-    local dest_path="$1" dest_dir tmp_path
-    shift
-    dest_dir="$(dirname "$dest_path")"
-    mkdir -p "$dest_dir" || bbb_die "cannot create directory $dest_dir"
-    tmp_path="$dest_path.tmp.$$"
-    rm -f "$tmp_path"
+    local dest_path="$1" mode="$2" dest_dir tmp_path
+    shift 2
+    _bbb_check_dest "$dest_path"
+    dest_dir="$(dirname -- "$dest_path")"
+    mkdir -p -- "$dest_dir" || bbb_die "cannot create directory $dest_dir"
+    if [ -z "$mode" ]; then
+        if [ -e "$dest_path" ]; then
+            mode="$(stat -L -c %a -- "$dest_path")" || bbb_die "cannot read the mode of $dest_path"
+        else
+            mode="$(printf '%04o' "$(( 0666 & ~0$(umask) ))")"
+        fi
+    fi
+    tmp_path="$(mktemp -- "$dest_dir/.$(basename -- "$dest_path").XXXXXX")" \
+        || bbb_die "cannot create a temporary file in $dest_dir"
     if ! "$@" >"$tmp_path"; then
-        rm -f "$tmp_path"
+        rm -f -- "$tmp_path"
         return 1
     fi
-    mv -f "$tmp_path" "$dest_path" || bbb_die "cannot write $dest_path"
+    if ! chmod "$mode" -- "$tmp_path" || ! mv -f -- "$tmp_path" "$dest_path"; then
+        rm -f -- "$tmp_path"
+        bbb_die "cannot write $dest_path"
+    fi
 }
 
 # --- render ------------------------------------------------------------------------------
 
-# bbb_render TEMPLATE DEST — substitute project variables in TEMPLATE, write DEST.
+# bbb_render [--mode MODE] [--xml] TEMPLATE DEST — substitute project variables in TEMPLATE,
+# write DEST.
 #
 # Only braced upper-case names (${BBB_DOMAIN}) are project variables. Everything else,
 # including nginx variables such as $host and HOCON ${?VAR}, is copied unchanged. Every
 # project variable used by the template must be set (empty is allowed); otherwise nothing is
 # written and the missing names are reported. Shell variables need not be exported.
+#
+# Values must not contain CR or LF (they would add lines to the output). --xml escapes
+# & < > " ' in every substituted value, for XML targets. Never render shell fragments:
+# use bbb_write_shell_vars.
 bbb_render() {
-    [ "$#" -eq 2 ] || bbb_die "usage: bbb_render TEMPLATE DEST"
+    local mode="" xml=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --mode) [ "$#" -ge 2 ] || bbb_die "bbb_render: --mode needs a value"
+                    _bbb_check_mode "$2"; mode="$2"; shift 2 ;;
+            --xml) xml=1; shift ;;
+            --) shift; break ;;
+            -*) bbb_die "bbb_render: unknown option $1" ;;
+            *) break ;;
+        esac
+    done
+    [ "$#" -eq 2 ] || bbb_die "usage: bbb_render [--mode MODE] [--xml] TEMPLATE DEST"
     local tpl_path="$1" dest_path="$2"
+    _bbb_check_dest "$dest_path"
     _bbb_require_file "$tpl_path" template
     command -v envsubst >/dev/null 2>&1 || bbb_die "envsubst not found (install gettext-base)"
 
@@ -180,9 +251,18 @@ bbb_render() {
         fi
     done
 
-    local missing=()
+    local missing=() line_break=$'[\r\n]'
     for var_name in "${names[@]}"; do
-        [ -n "${!var_name+set}" ] || missing+=("$var_name")
+        case "$_BBB_SHELL_VARS" in
+            *" $var_name "*) bbb_die "template $tpl_path uses \${$var_name}, which bash sets itself" ;;
+        esac
+        if [ -z "${!var_name+set}" ]; then
+            missing+=("$var_name")
+            continue
+        fi
+        if [[ "${!var_name}" =~ $line_break ]]; then
+            bbb_die "value of $var_name contains a line break; refusing to render $tpl_path"
+        fi
         # envsubst would also replace the unbraced form; refuse it so the rule stays simple.
         unbraced='\$'"$var_name"'([^A-Za-z0-9_]|$)'
         if [[ "$content" =~ $unbraced ]]; then
@@ -194,56 +274,110 @@ bbb_render() {
     fi
 
     if [ "${#names[@]}" -eq 0 ]; then
-        _bbb_write "$dest_path" cat "$tpl_path" || bbb_die "cannot write $dest_path"
+        _bbb_write "$dest_path" "$mode" cat -- "$tpl_path" || bbb_die "cannot write $dest_path"
     else
-        _bbb_write "$dest_path" _bbb_envsubst "$tpl_path" "${names[@]}" \
+        _bbb_write "$dest_path" "$mode" _bbb_envsubst "$xml" "$tpl_path" "${names[@]}" \
             || bbb_die "rendering $tpl_path failed"
     fi
     bbb_log "rendered $dest_path"
 }
 
-# _bbb_envsubst TEMPLATE NAME... — envsubst restricted to the given names. Runs in a subshell,
-# so exporting the names does not change the caller's environment.
+# _bbb_envsubst XML TEMPLATE NAME... — envsubst restricted to the given names, values
+# XML-escaped if XML is non-empty. Runs in a subshell, so exporting (and escaping) does not
+# change the caller's variables.
 _bbb_envsubst() (
-    local tpl_path="$1" format="" var_name
-    shift
+    local xml="$1" tpl_path="$2" format="" var_name value
+    shift 2
     for var_name in "$@"; do
+        if [ -n "$xml" ]; then
+            value="${!var_name}"
+            # Quoted replacements: with bash 5.2 patsub_replacement, a bare & means "match".
+            value="${value//&/"&amp;"}"
+            value="${value//</"&lt;"}"
+            value="${value//>/"&gt;"}"
+            value="${value//\"/"&quot;"}"
+            value="${value//\'/"&apos;"}"
+            printf -v "$var_name" '%s' "$value"
+        fi
         export "${var_name?}"
         format+="\${$var_name} "
     done
     envsubst "$format" <"$tpl_path"
 )
 
+# bbb_write_shell_vars [--mode MODE] DEST NAME... — write a file that a shell sources:
+# one `NAME='value'` line per variable, single-quoted for POSIX sh, so no value is ever
+# executed. Every NAME must be set (empty is allowed).
+bbb_write_shell_vars() {
+    local mode=""
+    if [ "${1:-}" = "--mode" ]; then
+        [ "$#" -ge 2 ] || bbb_die "bbb_write_shell_vars: --mode needs a value"
+        _bbb_check_mode "$2"; mode="$2"; shift 2
+    fi
+    [ "$#" -ge 2 ] || bbb_die "usage: bbb_write_shell_vars [--mode MODE] DEST NAME..."
+    local dest_path="$1" var_name
+    shift
+    _bbb_check_dest "$dest_path"
+    for var_name in "$@"; do
+        _bbb_check_name "$var_name"
+        [ -n "${!var_name+set}" ] || bbb_die "variable $var_name is not set"
+    done
+    _bbb_write "$dest_path" "$mode" _bbb_shell_vars "$@" || bbb_die "cannot write $dest_path"
+    bbb_log "wrote shell variables ($*) to $dest_path"
+}
+
+_bbb_shell_vars() {
+    local var_name value
+    for var_name in "$@"; do
+        value="${!var_name}"
+        value="${value//\'/\'\\\'\'}"
+        printf "%s='%s'\n" "$var_name" "$value"
+    done
+}
+
 # --- merge -------------------------------------------------------------------------------
 
-# Resolve the yq binary once, in the current shell (not in a command substitution, so a
-# missing yq stops the entrypoint).
+# Resolve the yq binary once, from PATH, in the current shell (not in a command substitution,
+# so a missing yq stops the entrypoint).
 _bbb_find_yq() {
-    if [ -n "${BBB_YQ:-}" ]; then return 0; fi
-    if command -v yq >/dev/null 2>&1; then BBB_YQ=yq
-    elif command -v yq-go >/dev/null 2>&1; then BBB_YQ=yq-go # upstream package name
-    else bbb_die "yq (mikefarah/yq v4) not found"
+    if [ -n "$_BBB_YQ" ]; then return 0; fi
+    if command -v yq >/dev/null 2>&1; then _BBB_YQ="$(command -v yq)"
+    elif command -v yq-go >/dev/null 2>&1; then _BBB_YQ="$(command -v yq-go)" # upstream package name
+    else bbb_die "yq (mikefarah/yq v4) not found in PATH"
     fi
 }
 
 _bbb_yq() {
-    "$BBB_YQ" "$@"
+    "$_BBB_YQ" "$@"
 }
 
-# bbb_merge_yaml BASE OVERRIDE DEST — deep-merge OVERRIDE into BASE and write DEST, the same
-# way upstream packaging does (yq `. * $item`): maps merge, arrays and scalars are replaced,
-# key order of BASE is kept. A missing OVERRIDE is not an error: DEST is a copy of BASE. An
-# OVERRIDE that is not valid YAML, or not a single mapping, is an error naming the file.
+# bbb_merge_yaml [--mode MODE] BASE OVERRIDE DEST — deep-merge OVERRIDE into BASE and write
+# DEST, the same way upstream packaging does (yq `. * $item`): maps merge, arrays and scalars
+# are replaced, key order of BASE is kept. A missing OVERRIDE is not an error: DEST is a copy
+# of BASE. An OVERRIDE that is a dangling symlink, not valid YAML, or not a single mapping is
+# an error naming the file.
 bbb_merge_yaml() {
-    [ "$#" -eq 3 ] || bbb_die "usage: bbb_merge_yaml BASE OVERRIDE DEST"
+    local mode=""
+    if [ "${1:-}" = "--mode" ]; then
+        [ "$#" -ge 2 ] || bbb_die "bbb_merge_yaml: --mode needs a value"
+        _bbb_check_mode "$2"; mode="$2"; shift 2
+    fi
+    [ "$#" -eq 3 ] || bbb_die "usage: bbb_merge_yaml [--mode MODE] BASE OVERRIDE DEST"
     local base_path="$1" override_path="$2" dest_path="$3" kind
+    _bbb_check_dest "$dest_path"
     _bbb_require_file "$base_path" "base file"
     _bbb_find_yq
 
+    if [ -L "$override_path" ] && [ ! -e "$override_path" ]; then
+        bbb_die "override file $override_path is a dangling symlink"
+    fi
     if [ ! -e "$override_path" ]; then
-        _bbb_write "$dest_path" cat "$base_path" || bbb_die "cannot write $dest_path"
+        _bbb_write "$dest_path" "$mode" cat -- "$base_path" || bbb_die "cannot write $dest_path"
         bbb_log "no override $override_path; using $base_path"
         return 0
+    fi
+    if [ -d "$override_path" ]; then
+        bbb_die "override file $override_path is a directory (a bind mount of a missing file?)"
     fi
     _bbb_require_file "$override_path" "override file"
 
@@ -255,7 +389,7 @@ bbb_merge_yaml() {
     esac
 
     # shellcheck disable=SC2016 # a yq expression, not shell
-    _bbb_write "$dest_path" _bbb_yq eval-all '. as $item ireduce ({}; . * $item)' "$base_path" "$override_path" \
+    _bbb_write "$dest_path" "$mode" _bbb_yq eval-all '. as $item ireduce ({}; . * $item)' "$base_path" "$override_path" \
         || bbb_die "merging $override_path into $base_path failed"
     bbb_log "merged $override_path into $dest_path"
 }
