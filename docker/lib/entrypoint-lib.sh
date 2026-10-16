@@ -127,13 +127,39 @@ bbb_init() {
     if [ "${1:-}" = "--render-only" ]; then
         [ -n "${2:-}" ] || bbb_die "--render-only needs a directory"
         local root
-        root="$(realpath -m -- "$2")" || bbb_die "cannot resolve render-only directory"
+        _bbb_normalize_path "$2"
+        root="$_BBB_NORMALIZED"
         [ "$root" != "/" ] || bbb_die "--render-only directory must not be /"
         mkdir -p "$root" || bbb_die "cannot create render-only directory $root"
         BBB_RENDER_ROOT="$root"
         shift 2
     fi
     BBB_ARGS=("$@")
+}
+
+# _bbb_normalize_path PATH — set _BBB_NORMALIZED to PATH made absolute (against $PWD) with
+# empty, `.` and `..` components resolved lexically, like `realpath -m` without following
+# symlinks. Pure bash: BusyBox realpath (Alpine) has no -m.
+_bbb_normalize_path() {
+    local path="$1" part
+    local -a parts=() out=()
+    case "$path" in
+        /*) ;;
+        *) path="$PWD/$path" ;;
+    esac
+    IFS=/ read -r -a parts <<<"$path"
+    for part in "${parts[@]}"; do
+        case "$part" in
+            "" | .) ;;
+            ..) if [ "${#out[@]}" -gt 0 ]; then unset 'out[${#out[@]}-1]'; fi ;;
+            *) out+=("$part") ;;
+        esac
+    done
+    if [ "${#out[@]}" -eq 0 ]; then
+        _BBB_NORMALIZED=/
+    else
+        _BBB_NORMALIZED="$(IFS=/; printf '/%s' "${out[*]}")"
+    fi
 }
 
 # bbb_is_render_only — true in render-only mode.

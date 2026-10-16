@@ -316,6 +316,10 @@ for root in / // /. /tmp/..; do
 done
 run_lib "cd '$WORK'; bbb_init --render-only ./rel/../rel2/; bbb_path /etc/x"
 expect_out "init: relative root made absolute and normalized" "$WORK/rel2/etc/x"
+run_lib "bbb_init --render-only '$WORK/sp ace//./x/../y'; bbb_path /etc/x"
+expect_out "init: root with spaces, // . and .. normalized" "$WORK/sp ace/y/etc/x"
+run_lib "cd /tmp; bbb_init --render-only ../../../.."
+expect_rc "init: '..' above / resolves to / and is refused" 1
 run_lib "bbb_init --render-only '$WORK/r5'; bbb_path /../../etc/passwd"
 expect_rc "path: '..' refused" 1
 run_lib "bbb_path /etc/a..b/c"
