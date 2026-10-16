@@ -77,7 +77,7 @@ destination, but the first error message is the one that explains the cause.
 | `bbb_require_match NAME ERE` | the whole value must match the extended regular expression (the helper anchors it as `^(ERE)$`) | unset, or no full match; names the variable, never the value |
 | `bbb_default NAME VALUE` | sets NAME to VALUE if unset or empty, and exports it | wrong number of arguments |
 | `bbb_feature_enabled NAME` | returns 0 if NAME is an element of comma-separated `BBB_FEATURES` (exact match, spaces ignored), else 1 | — (use it in `if`) |
-| `bbb_init [--render-only DIR] [ARGS...]` | selects the mode; puts the remaining arguments in the array `BBB_ARGS`. DIR is made absolute and normalized (`realpath -m`) | `--render-only` without DIR, or DIR resolves to `/` |
+| `bbb_init [--render-only DIR] [ARGS...]` | selects the mode; puts the remaining arguments in the array `BBB_ARGS`. DIR is made absolute and normalized (lexically, like `realpath -m`) | `--render-only` without DIR, or DIR resolves to `/` |
 | `bbb_is_render_only` | returns 0 in render-only mode | — |
 | `bbb_path /ABS/PATH` | prints the path, prefixed with DIR in render-only mode | path not absolute, or has a `..` component |
 | `bbb_render [--mode M] [--xml] TEMPLATE DEST` | substitutes project variables, writes DEST atomically. `--xml` escapes `& < > " '` in every substituted value | template missing; a used variable is unset (all missing names listed); a value contains CR or LF; an unbraced `$NAME` of a used variable; a bash-set variable (`${RANDOM}`, `${SECONDS}`, `${BASHPID}`, `${UID}`, ...) |
@@ -196,9 +196,11 @@ target "web" {
 
 ```dockerfile
 COPY --from=entrypoint-lib entrypoint-lib.sh /usr/local/lib/bbb/entrypoint-lib.sh
-# envsubst: only images that render templates; pin the version of the base's release
+# envsubst: only images that render templates. No per-package version pin: the base image
+# is pinned by digest, and the installed package versions are recorded at build time.
+# hadolint ignore=DL3008
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gettext-base=<version> \
+    && apt-get install -y --no-install-recommends gettext-base \
     && rm -rf /var/lib/apt/lists/*
 COPY docker/entrypoint.sh /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
@@ -209,8 +211,10 @@ Runtime requirements: bash ≥ 4.4, coreutils; `envsubst` for `bbb_render`; mike
 `build/packages-template/bbb-yq-go/build.sh`, verified against `bbb-yq-go.sha256sum`
 (see `docker/tests/lib/Dockerfile`).
 
-Images without bash (e.g. Alpine or distroless) cannot use the helper. They use their
-component's native env support only.
+The helper also runs on Alpine once `bash` is added (`apk add bash`): it avoids GNU-only
+tool options, and Alpine's `envsubst` (package `gettext-envsubst`) passes the same tests.
+Images without bash (e.g. distroless) cannot use the helper; they use their component's native
+env support only.
 
 ## Tests
 

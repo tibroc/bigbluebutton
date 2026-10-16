@@ -24,8 +24,11 @@ RUN arch="$(dpkg --print-architecture)" \
 FROM docker.io/library/ubuntu@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
 
 # envsubst, the project templating tool, from the distribution (signed apt repository).
+# No per-package version pin: the digest-pinned base is the reproducibility anchor, and the
+# installed versions are recorded (run.sh prints them before the tests).
+# hadolint ignore=DL3008
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gettext-base=0.21-14ubuntu2 \
+    && apt-get install -y --no-install-recommends gettext-base \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=yq /usr/local/bin/yq /usr/local/bin/yq

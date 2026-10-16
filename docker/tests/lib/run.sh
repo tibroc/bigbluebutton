@@ -44,6 +44,10 @@ if ! "$ENGINE" build --build-arg "YQ_VERSION=$YQ_VERSION" -t "$IMAGE" "$CTX" >"$
     exit 1
 fi
 
+echo "== tool versions in $IMAGE"
+"$ENGINE" run --rm "$IMAGE" sh -c \
+    'dpkg-query -W bash gettext-base; yq --version; envsubst --version | head -n 1'
+
 rc=0
 echo "== test-entrypoint-lib.sh"
 "$ENGINE" run --rm "$IMAGE" /src/docker/tests/lib/test-entrypoint-lib.sh || rc=1
