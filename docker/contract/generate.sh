@@ -45,7 +45,8 @@ done
 CONTRACT="${CONTRACT:-$ROOT/docker/config-contract.yaml}"
 [ -r "$CONTRACT" ] || usage "contract not readable: $CONTRACT"
 
-if ! "$CONTRACT_TOOLS_DIR/validate.sh" "$CONTRACT" >/dev/null; then
+# schema problems (stdout of validate.sh) go to stderr; its "valid" summary is dropped
+if ! "$CONTRACT_TOOLS_DIR/validate.sh" "$CONTRACT" >&2 2>/dev/null; then
     echo "generate: the contract is invalid; run docker/contract/validate.sh" >&2
     exit 1
 fi
