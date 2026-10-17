@@ -95,6 +95,26 @@ overrides:
     status: draft
     sources:
       - bigbluebutton-web/grails-app/conf/application.groovy:13-16 @ 35cad46a9f
+features:
+  - name: recording
+    services: [recorder]
+    settings: ['web: disableRecordingDefault from the feature']
+    description: Records meetings.
+    status: draft
+    sources:
+      - bigbluebutton-web/grails-app/conf/bigbluebutton.properties:317-319 @ 35cad46a9f
+  - name: webhooks
+    services: [webhooks]
+    settings: []
+    description: Webhooks.
+    status: draft
+    sources: []
+decided:
+  - id: sample-decided
+    date: '2026-10-17'
+    choice: a
+    decision: Keep the domain variable.
+    affects: [BBB_DOMAIN]
 decisions_needed:
   - id: sample-decision
     question: Keep the workers default?

@@ -33,15 +33,15 @@ Exit codes: 0 ok, 1 findings (schema problems, drift, differences), 2 usage erro
 ## Schema
 
 Top-level keys: `version` (1), `meta`, `variables`, `derived`, `internal`, `overrides`,
-`decisions_needed`. Unknown keys and fields are errors. Text fields (`description`, `notes`,
+`features`, `decided`, `decisions_needed`. `variables` is required, the other lists may be
+missing (empty). Unknown keys and fields are errors. Text fields (`description`, `notes`,
 `formula`, `merge`, ...) are one line without tabs and with balanced backticks; use YAML `>-`
 for long text. Every entry has `sources`: a list with at least one upstream citation
 `path:lines @ sha` (optionally followed by ` — note`); entries starting with `UNVERIFIED` are
 allowed in addition.
 
-`status` (every entry): `draft` (proposal, approved with the contract), `pending-g2` (depends
-on the container networking measurements), `pending-g3` (depends on an open decision in
-`decisions_needed`).
+`status` (every entry): `draft` (agreed, not yet released), `pending-g2` / `pending-g3`
+(depends on an open question in `decisions_needed`; no entry uses them after G3).
 
 ### `variables` — what an admin may set
 
@@ -52,7 +52,7 @@ on the container networking measurements), `pending-g3` (depends on an open deci
 | `required` | yes | `true`: images refuse to start without a non-empty value. A required variable has no default |
 | `secret` | yes | `true`: never printed, never shown with a value in generated files; `default` must be `null`; `example` is `null` or a project fixture (`fixture…notreal…`) |
 | `default` | yes | string used when unset or empty, or `null` (no default). Quote numbers and booleans |
-| `pattern` | yes | extended regular expression the **whole** value must match (anchored as `^(ERE)$`, exactly like `bbb_require_match` in `docker/lib/entrypoint-lib.sh`). Checked for non-empty values; whether empty is allowed is `required` |
+| `pattern` | yes | extended regular expression the **whole** value must match (anchored as `^(ERE)$`, exactly like `bbb_require_match` in `docker/lib/entrypoint-lib.sh`). **Enforced** (G3 decision `value-patterns`): every entrypoint that reads the variable calls `bbb_require_match NAME '<pattern>'` and refuses to start on a mismatch; setup and preflight check the same patterns. Checked for non-empty values; whether empty is allowed is `required` |
 | `setup` | no | how the setup container fills it: `generate` (random secret), `detect` (e.g. public IP), `ask`; omitted or `null`: setup leaves it alone. Tier 1 secrets must be `generate` |
 | `description` | yes | one line for admins |
 | `consumers` | yes | services that read the value (directly or derived) |
@@ -86,11 +86,27 @@ also be a user variable.
 
 ### `overrides` — Tier 3 files
 
-Fields, all required: `component`, `path` (absolute bare-metal path, unique), `format`
+Fields: `component`, `path` (absolute bare-metal path, unique), `format`
 (`properties xml hocon yaml json env ini nginx shell`), `merge` (how the file is applied, as
 upstream and in the container), `support` (`supported`, `not-supported` — the bare-metal
 mechanism does not exist in containers and the description says what replaces it — or
-`pending`), `status`, `sources`.
+`pending`), `status`, `sources`; all required. Optional `env_precedence`: for components where
+environment variables beat the file (node-config: bbb-webhooks, bbb-webrtc-sfu; G3 decision
+`env-vs-override-precedence`), which settings the image passes as env and therefore cannot be
+changed in the file.
+
+### `features` — entries of `BBB_FEATURES`
+
+Fields, all required: `name` (lower-case, unique, must be accepted by the `BBB_FEATURES`
+pattern), `services` (what its Compose profile starts), `settings` (list of
+`image: setting` the images derive from the feature; may be empty), `description`, `status`,
+`sources` (at least one citation when `settings` is not empty; may be empty otherwise).
+
+### `decided` — decisions taken
+
+Fields: `id` (unique, also across `decisions_needed`), `date` (quoted `YYYY-MM-DD`), `choice`
+(the option chosen), `decision` (one line: what was decided), `affects` (declared variables),
+`related` (optional). A question moves here from `decisions_needed` once decided.
 
 ### `decisions_needed` — open questions for the human gate
 

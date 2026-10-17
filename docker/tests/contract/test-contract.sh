@@ -88,6 +88,15 @@ validate_planted unbalanced-backtick '.variables[0].description = "a `b"' "unbal
 validate_planted decision-affects '.decisions_needed[0].affects = ["NOPE"]' "affects undeclared variable NOPE"
 validate_planted decision-option '.decisions_needed[0].options[1] = {"id": "b"}' "options[1] must have exactly the string fields id and text"
 validate_planted override-path '.overrides[0].path = "etc/x"' "path must be absolute"
+validate_planted feature-pattern '.features[1].name = "chat"' "name is not accepted by the BBB_FEATURES pattern"
+validate_planted feature-settings-uncited '.features[0].sources = []' "features[0] (recording): field 'sources' must not be empty"
+validate_planted decided-date '.decided[0].date = "17.10.2026"' "date must be a quoted YYYY-MM-DD"
+validate_planted decided-duplicate-id '.decided[0].id = "sample-decision"' "decisions_needed[0] (sample-decision): duplicate id"
+validate_planted decided-affects '.decided[0].affects = ["NOPE"]' "decided[0] (sample-decided): affects undeclared variable NOPE"
+validate_planted env-precedence-type '.overrides[0].env_precedence = ["x"]' "field 'env_precedence' must be !!str"
+c="$(planted_contract optional-sections 'del(.features) | del(.decided) | del(.decisions_needed)')"
+run "$TOOLS/validate.sh" "$c"
+expect_rc "validate: optional sections may be missing" 0
 
 printf 'BBB_DOMAIN=not a host\nTURN_SECRET=short\nUNKNOWN_VAR=x\n' >"$WORK/bad-fixtures.env"
 run "$TOOLS/validate.sh" --fixtures "$WORK/bad-fixtures.env" "$FIX/contract.yaml"
@@ -175,6 +184,10 @@ COMPOSE_PROFILES=\${BBB_FEATURES}"
 expect_not_contains "generate: no fixture secret in .env.sample" "$(cat "$env_sample")" "fixtureturnsecret"
 expect_not_contains "generate: no fixture secret in the docs page" "$(cat "$doc")" "fixtureturnsecret"
 expect_contains "generate: docs page lists Tier 2" "$(cat "$doc")" "### RECORDING_WORKERS"
+expect_contains "generate: docs page lists features" "$(cat "$doc")" '| `recording` | recorder | web: disableRecordingDefault from the feature |'
+expect_contains "generate: docs page lists decisions" "$(cat "$doc")" '| `sample-decided` | 2026-10-17 | (a) Keep the domain variable. |'
+expect_contains "generate: docs page says patterns are enforced" "$(cat "$doc")" "Every
+  image entrypoint enforces it"
 expect_contains "generate: docs page escapes MDX outside code" "$(cat "$doc")" '| `compose_profiles` | `${BBB_FEATURES}` |'
 
 cp "$env_sample" "$WORK/env.first"

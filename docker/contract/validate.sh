@@ -52,8 +52,10 @@ while IFS= read -r key; do
     contract_in_list "$key" "${TOP_LEVEL_KEYS[@]}" || problem "top level" "unknown key '$key'"
 done < <("$YQ" -r 'keys | .[]' "$CONTRACT")
 [ "$("$YQ" '.version' "$CONTRACT")" = 1 ] || problem "version" "must be 1"
-for section in variables derived internal overrides decisions_needed; do
+# variables is required; the other sections are optional (missing = empty list)
+for section in variables derived internal overrides features decided decisions_needed; do
     t="$("$YQ" ".${section} | type" "$CONTRACT")"
+    if [ "$t" = '!!null' ] && [ "$section" != variables ]; then continue; fi
     [ "$t" = '!!seq' ] || problem "$section" "must be a list (is $t)"
 done
 [ "$PROBLEMS" -eq 0 ] || exit 1
@@ -275,14 +277,73 @@ for ((i = 0; i < O_n; i++)); do
     fi
     need_enum "$where" O format "$i" "${OVERRIDE_FORMATS[@]}" || true
     need_text "$where" O merge "$i" || true
+    [ "${O_env_precedence_t[$i]}" = '!!null' ] || need_text "$where" O env_precedence "$i" || true
     need_enum "$where" O support "$i" "${OVERRIDE_SUPPORT[@]}" || true
     need_enum "$where" O status "$i" "${STATUSES[@]}" || true
     need_sources "$where" O "$i" || true
 done
 
+# --- features --------------------------------------------------------------------------------
+contract_load "$CONTRACT" features F "${FEATURE_FIELDS[@]}"
+declare -A FEATURE_NAMES=()
+features_pattern=""
+[ -z "${VAR_INDEX[BBB_FEATURES]+set}" ] || features_pattern="${V_pattern[${VAR_INDEX[BBB_FEATURES]}]}"
+for ((i = 0; i < F_n; i++)); do
+    name="${F_name[$i]}"
+    where="features[$i]${name:+ ($name)}"
+    check_keys "$where" F "$i" "${FEATURE_REQUIRED[@]}" -- "${FEATURE_FIELDS[@]}" || continue
+    if need_type "$where" F name "$i" '!!str'; then
+        if [[ ! "$name" =~ ^[a-z][a-z0-9-]*$ ]]; then problem "$where" "name must be lower-case words joined by '-'"
+        elif [ -n "${FEATURE_NAMES[$name]+set}" ]; then problem "$where" "duplicate name"
+        else FEATURE_NAMES[$name]=$i
+        fi
+        if [ -n "$features_pattern" ] && contract_ere_valid "$features_pattern" &&
+            ! contract_full_match "$name" "$features_pattern"; then
+            problem "$where" "name is not accepted by the BBB_FEATURES pattern"
+        fi
+    fi
+    need_list "$where" F services "$i" nonempty || true
+    need_text "$where" F description "$i" || true
+    need_enum "$where" F status "$i" "${STATUSES[@]}" || true
+    if need_list "$where" F settings "$i"; then
+        if [ -n "${F_settings[$i]}" ]; then
+            need_sources "$where" F "$i" || true # settings must be backed by sources
+        elif need_list "$where" F sources "$i"; then
+            while IFS= read -r src; do
+                [ -z "$src" ] || [[ "$src" =~ $CITATION_ERE ]] || [[ "$src" == UNVERIFIED* ]] ||
+                    problem "$where" "source is neither 'path:lines @ sha' nor UNVERIFIED: $src"
+            done <<<"${F_sources[$i]}"
+        fi
+    fi
+done
+
+# --- decided ---------------------------------------------------------------------------------
+contract_load "$CONTRACT" decided C "${DECIDED_FIELDS[@]}"
+declare -A DECISION_IDS=()
+for ((i = 0; i < C_n; i++)); do
+    id="${C_id[$i]}"
+    where="decided[$i]${id:+ ($id)}"
+    check_keys "$where" C "$i" "${DECIDED_REQUIRED[@]}" -- "${DECIDED_FIELDS[@]}" || continue
+    if need_type "$where" C id "$i" '!!str'; then
+        [[ "$id" =~ ^[a-z][a-z0-9-]*$ ]] || problem "$where" "id must be lower-case words joined by '-'"
+        [ -z "${DECISION_IDS[$id]+set}" ] || problem "$where" "duplicate id"
+        DECISION_IDS[$id]=1
+    fi
+    if need_type "$where" C date "$i" '!!str'; then
+        [[ "${C_date[$i]}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || problem "$where" "date must be a quoted YYYY-MM-DD"
+    fi
+    need_text "$where" C choice "$i" || true
+    need_text "$where" C decision "$i" || true
+    [ "${C_related_t[$i]}" = '!!null' ] || need_list "$where" C related "$i" || true
+    if need_list "$where" C affects "$i" nonempty; then
+        while IFS= read -r a; do
+            [ -z "$a" ] || [ -n "${VAR_INDEX[$a]+set}" ] || problem "$where" "affects undeclared variable $a"
+        done <<<"${C_affects[$i]}"
+    fi
+done
+
 # --- decisions_needed ------------------------------------------------------------------------
 contract_load "$CONTRACT" decisions_needed Q "${DECISION_FIELDS[@]}"
-declare -A DECISION_IDS=()
 for ((i = 0; i < Q_n; i++)); do
     id="${Q_id[$i]}"
     where="decisions_needed[$i]${id:+ ($id)}"
@@ -351,5 +412,5 @@ if [ "$PROBLEMS" -gt 0 ]; then
     echo "$PROBLEMS problem(s) in $CONTRACT" >&2
     exit 1
 fi
-echo "valid: $CONTRACT (${V_n} variables, ${D_n} derived, ${I_n} internal, ${O_n} overrides, ${Q_n} decisions)${FIXTURES_FILE:+; fixtures ok}" >&2
+echo "valid: $CONTRACT (${V_n} variables, ${D_n} derived, ${I_n} internal, ${O_n} overrides, ${F_n} features, ${C_n} decided, ${Q_n} open decisions)${FIXTURES_FILE:+; fixtures ok}" >&2
 exit 0

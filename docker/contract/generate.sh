@@ -13,7 +13,7 @@
 # The output depends only on the contract: same contract, byte-identical files.
 # Exit: 0 ok, 1 --check found a difference or the contract is invalid, 2 usage error.
 
-# V_*, D_*, I_*, O_*, Q_* arrays are created by contract_load (common.sh) with eval.
+# V_*, D_*, I_*, O_*, F_*, C_*, Q_* arrays are created by contract_load (common.sh) with eval.
 # shellcheck disable=SC2154
 set -euo pipefail
 CONTRACT_TOOL=generate
@@ -56,6 +56,8 @@ contract_load "$CONTRACT" variables V "${VAR_FIELDS[@]}"
 contract_load "$CONTRACT" derived D "${DERIVED_FIELDS[@]}"
 contract_load "$CONTRACT" internal I "${INTERNAL_FIELDS[@]}"
 contract_load "$CONTRACT" overrides O "${OVERRIDE_FIELDS[@]}"
+contract_load "$CONTRACT" features F "${FEATURE_FIELDS[@]}"
+contract_load "$CONTRACT" decided C "${DECIDED_FIELDS[@]}"
 contract_load "$CONTRACT" decisions_needed Q "${DECISION_FIELDS[@]}"
 
 # --- text helpers ------------------------------------------------------------------------------
@@ -146,8 +148,7 @@ setup_text() {
 status_text() {
     case "$1" in
         draft) printf 'draft' ;;
-        pending-g2) printf 'pending (networking spikes)' ;;
-        pending-g3) printf 'pending (open decision)' ;;
+        pending-g2 | pending-g3) printf 'pending' ;;
     esac
 }
 
@@ -243,7 +244,7 @@ doc_variable_details() { # TIER
 }
 
 gen_doc() {
-    local i d o q
+    local i d o q f c settings applied
     cat <<'EOF'
 ---
 id: docker-configuration
@@ -275,17 +276,21 @@ orchestrators.
 | 2 | Advanced values with defaults | `.env`, optional | admins with special needs |
 | 3 | Override files | mounted at the same paths as on a bare-metal server | admins following the existing BigBlueButton documentation |
 
-- Every value has a format. An image refuses to start when a required value is missing or a
-  value does not have its format, and names the variable in its log.
+- Every value has a format (an extended regular expression the whole value must match). Every
+  image entrypoint enforces it: an image refuses to start when a required value is missing or
+  a value does not have its format, and names the variable (never the value) in its log. The
+  setup and preflight containers check the same formats.
 - Derived values (URLs, TURN URIs, per-service settings) are computed by the images. Do not set
   them.
-- Set `BBB_FEATURES` only in `.env`, not in the shell, so that the started services and the
-  image configuration agree.
+- Set `BBB_FEATURES` in `.env`; Compose derives the profiles from it, and the images derive
+  their settings from it (see [Features](#features)).
+- bbb-webhooks and bbb-webrtc-sfu (node-config) give environment variables precedence over
+  their Tier 3 file: settings the image passes as variables cannot be changed in the file.
+  The Tier 3 table lists them.
 - Booleans are `true` or `false`; lists are comma-separated without spaces.
 
-Status of an entry: **draft** (proposal), **pending (networking spikes)** (depends on
-measurements of the container networking), **pending (open decision)** (see
-[Open decisions](#open-decisions)).
+Status of an entry: **draft** (agreed, not yet released), **pending** (depends on an open
+question; see [Decisions](#decisions)).
 
 ## Tier 1: essential settings
 
@@ -301,6 +306,22 @@ Optional. Unset variables take the default shown.
 EOF
     doc_variable_table 2
     doc_variable_details 2
+    cat <<'EOF'
+
+## Features
+
+Entries of `BBB_FEATURES`. Each one starts the services of the Compose profile of the same
+name, and the images derive the settings listed.
+
+| Feature | Starts | Settings the images derive | Description |
+|---|---|---|---|
+EOF
+    for ((f = 0; f < F_n; f++)); do
+        settings="$(join_lines '; ' "${F_settings[$f]}")"
+        printf '| %s | %s | %s | %s |\n' "$(md_code "${F_name[$f]}" table)" \
+            "$(md_text "$(join_lines ', ' "${F_services[$f]}")" table)" "$(md_text "${settings:-—}" table)" \
+            "$(md_text "${F_description[$f]}" table)"
+    done
     cat <<'EOF'
 
 ## Derived values
@@ -340,16 +361,30 @@ same as on a bare-metal server, so the existing documentation applies.
 |---|---|---|---|---|
 EOF
     for ((o = 0; o < O_n; o++)); do
+        applied="${O_merge[$o]}"
+        [ -z "${O_env_precedence[$o]}" ] || applied+=" **Environment first:** ${O_env_precedence[$o]}"
         printf '| %s | %s | %s | %s | %s |\n' "$(md_text "${O_component[$o]}" table)" "$(md_code "${O_path[$o]}" table)" \
-            "${O_format[$o]}" "$(md_text "${O_merge[$o]}" table)" "${O_support[$o]}"
+            "${O_format[$o]}" "$(md_text "$applied" table)" "${O_support[$o]}"
     done
     cat <<'EOF'
 
-## Open decisions
+## Decisions
 
-Questions still open in this draft. Variables they affect have the status "pending (open
-decision)".
+Decisions taken on this configuration contract.
+
+| Decision | Date | Choice |
+|---|---|---|
 EOF
+    for ((c = 0; c < C_n; c++)); do
+        printf '| %s | %s | (%s) %s |\n' "$(md_code "${C_id[$c]}" table)" "${C_date[$c]}" \
+            "$(md_text "${C_choice[$c]}" table)" "$(md_text "${C_decision[$c]}" table)"
+    done
+    echo
+    if [ "$Q_n" -eq 0 ]; then
+        echo 'No questions are open.'
+    else
+        echo 'Open questions; variables they affect have the status "pending".'
+    fi
     for ((q = 0; q < Q_n; q++)); do
         echo
         printf '### %s\n\n' "${Q_id[$q]}"
