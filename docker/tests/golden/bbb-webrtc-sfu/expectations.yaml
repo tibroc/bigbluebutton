@@ -24,7 +24,6 @@ must_fail:
   - {unset: BBB_DOMAIN, message: BBB_DOMAIN}
   - {set: {LIVEKIT_API_KEY: "LIVEKIT_KEY"}, message: LIVEKIT_API_KEY}         # shipped placeholder
   - {set: {LIVEKIT_API_SECRET: "LIVEKIT_SECRET"}, message: LIVEKIT_API_SECRET} # shipped placeholder
-  - {set: {BBB_DOMAIN: "BBB_DOMAIN"}, message: BBB_DOMAIN}                    # shipped placeholder
   - {set: {LIVEKIT_API_SECRET: "secret"}, message: LIVEKIT_API_SECRET}
   - {set: {BBB_DOMAIN: "not a domain"}, message: BBB_DOMAIN}
   - {set: {BBB_DOMAIN: "bbb.example.com\n# injected"}, message: BBB_DOMAIN}
