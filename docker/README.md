@@ -42,6 +42,44 @@ adding an image means adding its bake file, one line in the `default` group in
 `docker-bake.hcl` (bake does not merge a group defined in several files: the last definition
 wins) and its job in `build-all-images.yml`.
 
+### Image names
+
+`docker-compose.yml` runs `${BBB_IMAGE_REGISTRY}/bbb-<image>:${BBB_IMAGE_TAG}` (defaults
+`ghcr.io/bigbluebutton` and `4.0.1`, see `docker/config-contract.yaml`). Bake tags local builds
+the same way, with the bake variables `BBB_IMAGE_REGISTRY` (default `localhost`) and
+`BBB_IMAGE_TAG` (default `4.0.1`). In CI the tags of docker/metadata-action replace them.
+
+| Bake target | Image | Compose service |
+|---|---|---|
+| `apps-akka` | `bbb-apps-akka` | `akka-apps` |
+| `bbb-webrtc-sfu` | `bbb-webrtc-sfu` | `bbb-webrtc-sfu` |
+| `certbot` | `bbb-certbot` | `certbot` |
+| `coturn` | `bbb-coturn` | `coturn` |
+| `db-init` | `bbb-db-init` | `db-init` |
+| `graphql-actions` | `bbb-graphql-actions` | `graphql-actions` |
+| `graphql-middleware` | `bbb-graphql-middleware` | `graphql-middleware` |
+| `graphql-server` | `bbb-graphql-server` | `graphql-server` |
+| `haproxy` | `bbb-haproxy` | `haproxy` |
+| `livekit` | `bbb-livekit` | `livekit` |
+| `nginx` | `bbb-nginx` | `nginx` |
+| `postgres` | `bbb-postgres` | `postgres` |
+| `shared-notes` | `bbb-shared-notes` | `shared-notes` |
+| `web` | `bbb-web` | `bbb-web` |
+| `export-annotations` | `bbb-export-annotations` | not in the skeleton yet |
+| `learning-dashboard` | `bbb-learning-dashboard` | not in the skeleton yet |
+| `record-and-playback` | `bbb-record-and-playback` | not in the skeleton yet |
+| `html5-client` | `bbb-html5-client` | none: build stage of `nginx` |
+
+`bbb-common-message`, `bbb-common-web` and `_java-base` are build stages and get no tag.
+Third-party images (redis) are pinned by tag and digest in `docker-compose.yml`.
+
+To run the stack on local builds:
+
+```bash
+docker buildx bake -f docker-bake.hcl $(printf -- '-f %s ' docker/bake/*.hcl) --load
+BBB_IMAGE_REGISTRY=localhost docker compose up -d     # or set it in .env
+```
+
 ### Shared entrypoint helper
 
 Every image gets `docker/lib/entrypoint-lib.sh` the same way: its bake target inherits
@@ -86,6 +124,55 @@ Base images are pinned by digest, with the tag in a comment. apt/apk packages ar
 individually: the digest-pinned base is the reproducibility anchor, and each image's installed
 package versions are recorded at build time (SBOM). hadolint DL3008/DL3018 are therefore ignored
 in `docker/.hadolint.yaml`.
+
+## Running the stack
+
+`docker-compose.yml` at the repository root is the only compose file. It is static: settings
+come from `.env` (template: `.env.sample`, generated from `docker/config-contract.yaml`) and
+each service receives only the variables it reads. The images validate them at start and exit
+with a message naming a missing or malformed variable.
+
+- **Walking skeleton.** The file has the services of the skeleton: haproxy, certbot, nginx,
+  bbb-web, akka-apps, graphql-server, graphql-middleware, graphql-actions, shared-notes, redis,
+  postgres, db-init (a job that exits after setting up the databases), livekit, bbb-webrtc-sfu
+  and coturn. Recording, export-annotations, office conversion, webhooks, greenlight,
+  monitoring, setup and preflight follow; until then use `BBB_FEATURES=recording` or an empty
+  `BBB_FEATURES` (with `webhooks`, nginx would proxy to a service that does not exist yet).
+- **Restart nginx after recreating an upstream.** nginx resolves the service names it proxies
+  to once, at start, so it waits for all of them to be healthy. `docker compose up -d`
+  recreates only the services whose configuration or image changed; if that included one of
+  nginx's upstreams (bbb-web, shared-notes, graphql-server, graphql-middleware, livekit,
+  bbb-webrtc-sfu), run `docker compose restart nginx` afterwards, or nginx answers 502 for it.
+- **Ports.** Only nginx 80/tcp, haproxy 443/tcp, livekit 7882/udp and coturn 3478/udp+tcp are
+  published. haproxy and nginx run as non-root users and bind 443, 80 and 81 through the
+  per-container sysctl `net.ipv4.ip_unprivileged_port_start=0`. Published ports bypass ufw and
+  firewalld.
+- **Read-only root filesystems.** Every service runs with `read_only: true`. Each writes only to
+  its volumes and to tmpfs mounts at `/tmp` and the directories its entrypoint renders into
+  (Kubernetes: `emptyDir`).
+
+### Override files (Tier 3)
+
+Tier 3 files keep their bare-metal paths (`docker/config-contract.yaml`, `overrides`). Mount
+them in `docker-compose.override.yml` next to `docker-compose.yml`, which Docker Compose reads
+automatically, for example:
+
+```yaml
+services:
+  bbb-web:
+    volumes:
+      - /etc/bigbluebutton/bbb-web.properties:/etc/bigbluebutton/bbb-web.properties:ro
+```
+
+akka-apps always gets `/etc/bigbluebutton/bbb-html5.yml`, the html5 client settings override,
+as the compose config `bbb-html5` with the content `{}` (bare metal always has this file;
+without it akka-apps logs an error at every start). To use your own file, replace the config:
+
+```yaml
+configs:
+  bbb-html5: !override
+    file: /etc/bigbluebutton/bbb-html5.yml
+```
 
 ## Running under an arbitrary UID/GID
 
