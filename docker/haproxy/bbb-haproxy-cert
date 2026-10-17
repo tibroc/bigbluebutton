@@ -40,7 +40,6 @@ make_self_signed() {
     chmod 0600 "$tmp/bundle.pem"
     mv -f "$tmp/bundle.pem" "$SELF_SIGNED"
     rm -rf "$tmp"
-    log "no issued certificate yet: serving a temporary self-signed certificate"
 }
 
 # Replace the symlink atomically (rename over it).
@@ -52,6 +51,11 @@ point_link() {
 
 issued_available() { [ -s "$ISSUED" ] && [ -r "$ISSUED" ]; }
 
+# The likely deployment mistake: the bundle is there, but haproxy runs with another GID.
+log_unreadable() {
+    log "ERROR: $ISSUED exists but cannot be read as UID $(id -u) GID $(id -g) (groups: $(id -G)); serving a temporary self-signed certificate. Run haproxy with the group of the certificate service."
+}
+
 config_ok() { haproxy -c -q -f "$CFG" >/dev/null 2>&1; }
 
 select_cert() {
@@ -59,6 +63,10 @@ select_cert() {
         point_link "$ISSUED"
         config_ok && return 0
         log "ERROR: haproxy rejects $ISSUED; serving a temporary self-signed certificate instead"
+    elif [ -e "$ISSUED" ] && [ ! -r "$ISSUED" ]; then
+        log_unreadable
+    else
+        log "no issued certificate yet: serving a temporary self-signed certificate"
     fi
     make_self_signed
     point_link "$SELF_SIGNED"
@@ -86,6 +94,9 @@ watch_cert() {
         current="$(fingerprint "$target")"
         if [ "$current" = "$loaded" ] || [ "$current" = "$rejected" ]; then
             continue
+        fi
+        if [ "$target" = "$SELF_SIGNED" ] && [ -e "$ISSUED" ] && [ ! -r "$ISSUED" ]; then
+            log_unreadable
         fi
         previous="$(readlink "$LINK" 2>/dev/null || true)"
         point_link "$target"
