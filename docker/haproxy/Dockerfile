@@ -15,13 +15,11 @@ USER 0
 
 # bash for the entrypoint helper, envsubst for bbb_render, openssl for the temporary
 # self-signed certificate. socat (healthcheck) is part of the base image.
-RUN apk add --no-cache bash gettext-envsubst openssl
-
-# Writable for any UID: /etc/haproxy (rendered config, certificate symlink), /run/haproxy
-# (sockets, self-signed certificate) and /etc/haproxy/certs, the mount point of the volume
-# with the issued bundle (read-only for haproxy). The error pages keep their bare-metal path.
-RUN install -d -m 1777 /etc/haproxy /etc/haproxy/certs /run/haproxy \
-    && ln -s /usr/local/etc/haproxy/errors /etc/haproxy/errors
+# Writable for any UID: /etc/haproxy (rendered config, certificate and error page symlinks),
+# /run/haproxy (sockets, self-signed certificate) and /etc/haproxy/certs, the mount point of
+# the volume with the issued bundle (read-only for haproxy).
+RUN apk add --no-cache bash gettext-envsubst openssl \
+    && install -d -m 1777 /etc/haproxy /etc/haproxy/certs /run/haproxy
 
 # Shared entrypoint helper (P3). DL3022: entrypoint-lib is a named build context, not a stage.
 # hadolint ignore=DL3022

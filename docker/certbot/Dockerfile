@@ -19,11 +19,12 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates certbot gettext-base \
     && rm -rf /var/lib/apt/lists/*
 
-# Writable for any UID: the rendered configuration, and three volume mount points: certbot's
-# state (/etc/letsencrypt), the haproxy bundle (/etc/haproxy/certs) and the ACME challenge
-# directory below nginx's webroot (bbb-install: certbot -w /var/www/bigbluebutton-default/assets).
+# Writable for any UID (docker/README.md, rule 2): the rendered configuration, and the mount
+# points of the three volumes: letsencrypt at /etc/letsencrypt (certbot's state),
+# certs at /etc/haproxy/certs (the haproxy bundle) and acme-webroot at the ACME challenge
+# directory below the webroot (bbb-install: certbot -w /var/www/bigbluebutton-default/assets).
 RUN install -d -m 1777 /etc/bbb-certbot /etc/letsencrypt /etc/haproxy/certs \
-        /var/www/bigbluebutton-default/assets/.well-known
+        /var/www/bigbluebutton-default/assets/.well-known/acme-challenge
 
 # Shared entrypoint helper (P3). DL3022: entrypoint-lib is a named build context, not a stage.
 # hadolint ignore=DL3022

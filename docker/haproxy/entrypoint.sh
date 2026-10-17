@@ -31,6 +31,9 @@ if ! bbb_is_render_only; then
             bbb_die "cannot bind port 443 as UID $(id -u): set the sysctl net.ipv4.ip_unprivileged_port_start=0 for this container (compose: sysctls; Kubernetes: securityContext.sysctls)"
         fi
     fi
+    # The error pages at their bare-metal path, linked at start so that an empty /etc/haproxy
+    # (tmpfs or Kubernetes emptyDir for a read-only root filesystem) works too.
+    [ -e /etc/haproxy/errors ] || ln -sfn /usr/local/etc/haproxy/errors /etc/haproxy/errors
     bbb-haproxy-cert select
     bbb-haproxy-cert watch "$$" &
 fi
