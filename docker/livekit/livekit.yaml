@@ -1,7 +1,7 @@
-# Container wiring for livekit-server. Merged over the packaged default
-# (build/packages-template/bbb-livekit/livekit.yaml) at image build time; the result is the
-# image's /usr/share/livekit-server/livekit.yaml. Same merge as the bare-metal unit, so
-# /etc/bigbluebutton/livekit.yaml still overrides everything here.
+# Container wiring for livekit-server, installed as /usr/local/share/bbb/livekit/livekit.yaml.
+# The entrypoint merges it over the packaged default /usr/share/livekit-server/livekit.yaml
+# (build/packages-template/bbb-livekit/livekit.yaml, unchanged) at start, with the same merge
+# as the bare-metal unit, so /etc/bigbluebutton/livekit.yaml still overrides everything here.
 #
 # rtc: one multiplexed UDP port instead of the packaged range, which must be 0 or LiveKit
 # ignores udp_port (architecture ADR-06). udp_port is replaced by LIVEKIT_RTC_UDP_PORT at

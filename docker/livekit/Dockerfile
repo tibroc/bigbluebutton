@@ -80,16 +80,6 @@ RUN if [ "$TARGETARCH" != "amd64" ]; then \
     && grep ' yq_linux_amd64$' bbb-yq-go.sha256sum | sha256sum -c - \
     && install -m 0755 yq_linux_amd64 /usr/local/bin/yq
 
-# Image default: the packaged livekit.yaml with the container wiring merged over it, the same
-# merge the bare-metal unit does at start.
-# hadolint ignore=DL3022
-COPY --from=bbb-livekit livekit.yaml /build/config/packaged.yaml
-COPY livekit.yaml /build/config/container.yaml
-WORKDIR /build/config
-# hadolint ignore=SC2016
-RUN yq eval-all '. as $item ireduce ({}; . * $item) | ... comments = ""' packaged.yaml container.yaml >livekit.yaml
-
-
 # alpine:3.24.1
 FROM docker.io/library/alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 
@@ -98,8 +88,11 @@ RUN apk add --no-cache bash
 
 COPY --from=build /usr/local/bin/yq /usr/local/bin/yq
 COPY --from=build /build/livekit-server /usr/bin/livekit-server
-COPY --from=build --chmod=0644 /build/config/livekit.yaml /usr/share/livekit-server/livekit.yaml
-# DL3022: entrypoint-lib is a named build context, not a stage.
+# The packaged default, unchanged, at its bare-metal path; the container wiring is merged
+# over it at start. DL3022: bbb-livekit and entrypoint-lib are named build contexts.
+# hadolint ignore=DL3022
+COPY --from=bbb-livekit --chmod=0644 livekit.yaml /usr/share/livekit-server/livekit.yaml
+COPY --chmod=0644 livekit.yaml /usr/local/share/bbb/livekit/livekit.yaml
 # hadolint ignore=DL3022
 COPY --from=entrypoint-lib --chmod=0644 entrypoint-lib.sh /usr/local/lib/bbb/entrypoint-lib.sh
 COPY --chmod=0755 entrypoint.sh /entrypoint.sh
