@@ -1,0 +1,48 @@
+reference: ../../parity/reference/haproxy
+files:
+  - rendered: etc/haproxy/haproxy.cfg
+    reference: etc/haproxy/haproxy.cfg
+  - rendered: etc/haproxy/protocolmap
+    reference: etc/haproxy/protocolmap
+allowed:
+  # header comment of the image's file
+  - file: etc/haproxy/haproxy.cfg
+    line: '^# (haproxy for the BigBlueButton containers|bbb-install.s install_haproxy|docker/tests/golden/haproxy/parity\.yaml)'
+    reason: "comment only: points at this allowlist"
+  # global section
+  - file: etc/haproxy/haproxy.cfg
+    line: '^[[:space:]]*log (/dev/log[[:space:]]+local[01]( notice)?|stdout format raw local0)$'
+    reason: "images.md Runtime: logs to stdout/stderr; a container has no syslog socket at /dev/log"
+  - file: etc/haproxy/haproxy.cfg
+    line: '^[[:space:]]*(chroot /var/lib/haproxy|user haproxy|group haproxy)$'
+    reason: "docker/README.md 'Running under an arbitrary UID/GID': haproxy runs as the container's non-root UID from the start; chroot and the user switch need root"
+  - file: etc/haproxy/haproxy.cfg
+    line: '^[[:space:]]*daemon$'
+    reason: "images.md entrypoint pattern (exec, PID 1 is the service): haproxy runs in the foreground in master-worker mode (-W -db), like the packaged unit's -Ws"
+  # runtime name resolution of the bbb network services
+  - file: etc/haproxy/haproxy.cfg
+    line: '^(# (nginx and coturn are resolved|cluster DNS on Kubernetes|they are recreated)|resolvers dns|[[:space:]]*parse-resolv-conf|[[:space:]]*hold valid 10s|[[:space:]]*default-server init-addr last,libc,none resolvers dns)'
+    reason: "architecture.md Kubernetes check (no startup-order assumptions) and compose.md Networks (services other than LiveKit have dynamic addresses): haproxy starts without nginx/coturn and resolves them at runtime"
+  - file: etc/haproxy/haproxy.cfg
+    line: '^$'
+    reason: "blank lines around the added resolvers section and after the removed nginx-http2 backend"
+  # frontend: no HTTP/2 (G2 expectations; nginx has no h2 listener)
+  - file: etc/haproxy/haproxy.cfg
+    line: '^[[:space:]]*# (Http2 is disabled|HTTP/2 is not offered|We terminate SSL on haproxy|decide which protocol|This is negotiated by ALPN|Depending on the ALPN value|ALPN value h2|If no ALPN value is set|value traffic is sent|request\) goes to nginx|without ALPN, so this rule)'
+    reason: "comments only: rewritten without the HTTP/2 path that the container setup does not have (ADR-07, compose.md 'Routing on 443')"
+  - file: etc/haproxy/haproxy.cfg
+    line: '^[[:space:]]*use_backend nginx-http2 if \{ ssl_fc_alpn h2 \}$'
+    reason: "ADR-07 / compose.md 'Routing on 443': HTTP/1.1 and TURN only; h2 is not in the ALPN list upstream either, so the rule never matched"
+  - file: etc/haproxy/haproxy.cfg
+    line: '^(backend nginx-http2|[[:space:]]*server localhost 127\.0\.0\.1:82 send-proxy check)$'
+    reason: "ADR-07: no HTTP/2 backend (nginx :82 listener is not built)"
+  # backends: separate containers on the bbb network
+  - file: etc/haproxy/haproxy.cfg
+    line: '^[[:space:]]*server (localhost 203\.0\.113\.10:3478|coturn coturn:3478)$'
+    reason: "ADR-07 and g2-decisions N5: coturn is its own container on the bbb bridge network, reached by service name (plain TCP 3478), not via the public IP"
+  - file: etc/haproxy/haproxy.cfg
+    line: '^[[:space:]]*server (localhost 127\.0\.0\.1:81|nginx nginx:81) send-proxy check$'
+    reason: "compose.md 'Routing on 443': nginx is its own container, reached by service name on its PROXY-protocol port 81"
+  - file: etc/haproxy/haproxy.cfg
+    line: '^  mode tcp$'
+    reason: "the 'mode tcp' line of the removed nginx-http2 backend (ADR-07, no HTTP/2); the frontend and the turn/nginx backends keep theirs"
