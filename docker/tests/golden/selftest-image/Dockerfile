@@ -8,5 +8,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY lib/entrypoint-lib.sh /usr/local/lib/bbb/entrypoint-lib.sh
 COPY tests/golden/selftest-image/app.conf.tmpl /usr/local/share/selftest/app.conf.tmpl
+COPY tests/golden/selftest-image/app.yaml.tmpl /usr/local/share/selftest/app.yaml.tmpl
+COPY tests/golden/selftest-image/app.properties.tmpl /usr/local/share/selftest/app.properties.tmpl
 COPY tests/golden/selftest-image/entrypoint.sh /usr/local/bin/entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
