@@ -39,5 +39,9 @@ group "default" {
         "web",
         "record-and-playback",
         "nginx",
+        "postgres",
+        "db-init",
+        "coturn",
+        "livekit",
     ]
 }
