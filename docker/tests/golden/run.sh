@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Run the golden-file runner's tests: test-golden.sh (interface, protected), then
-# test-golden-extra.sh (additional behaviour).
+# Run the golden-file runner's tests: test-golden.sh and test-expectations.sh (interface,
+# protected), then test-golden-extra.sh (additional behaviour).
 #
 # Usage: docker/tests/golden/run.sh
 #   CONTAINER_ENGINE=docker|podman   engine to use (default: docker if installed, else podman)
 #
 # The runner runs on the host and starts the images under test with the engine. It needs yq
-# (mikefarah v4) for --parity. run.sh uses the version upstream pins
+# (mikefarah v4) for --parity and expectations.yaml. run.sh uses the version upstream pins
 # (build/packages-template/bbb-yq-go/build.sh): a `yq` in PATH of exactly that version, else
 # the binary built by the `yq` stage of docker/tests/lib/Dockerfile (checksum-verified against
 # upstream's bbb-yq-go.sha256sum), copied out once into
@@ -71,6 +71,8 @@ echo "== $ENGINE $("$ENGINE" --version | head -n 1)"
 rc=0
 echo "== test-golden.sh"
 "$HERE/test-golden.sh" || rc=1
+echo "== test-expectations.sh"
+"$HERE/test-expectations.sh" || rc=1
 if [ -f "$HERE/test-golden-extra.sh" ]; then
     echo "== test-golden-extra.sh"
     "$HERE/test-golden-extra.sh" || rc=1

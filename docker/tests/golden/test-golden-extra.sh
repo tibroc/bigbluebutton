@@ -189,6 +189,145 @@ run --parity par
 expect_line "invalid parity.yaml: reported" "^PARITY-FAIL par: parity.yaml: "
 expect_rc "invalid parity.yaml: exit 1" 1
 
+# --- expectations: invalid files (exit 2, naming the problem) ----------------------------------
+newcase inv "$BASE_IMAGE" BBB_DOMAIN=bbb.example.com
+run --update inv
+invalid_case() { # description expected-message-ERE expectations-yaml
+    printf '%s\n' "$3" >"$ROOT/inv/expectations.yaml"
+    run inv
+    expect_rc "invalid expectations, $1: exit 2" 2
+    expect_line "invalid expectations, $1: named" "$2"
+}
+invalid_case "missing file" '^error: inv/expectations\.yaml: render\[0\]: missing file$' \
+    'render:
+  - format: lines
+    checks: [{contains_line: "^workers="}]'
+invalid_case "unknown top-level key" '^error: inv/expectations\.yaml: unknown key: renders$' \
+    'renders: []'
+invalid_case "unknown format" 'render\[0\] \(etc/selftest/app\.conf\): unknown format: ini$' \
+    'render:
+  - {file: etc/selftest/app.conf, format: ini, checks: [{contains_line: x}]}'
+invalid_case "operator of another format" "checks\[0\]: 'contains_line' is not valid for format yaml$" \
+    'render:
+  - {file: etc/selftest/app.conf, format: yaml, checks: [{path: .a, contains_line: x}]}'
+invalid_case "invalid ERE" 'checks\[0\]: invalid ERE: \^\($' \
+    'render:
+  - {file: etc/selftest/app.conf, format: lines, checks: [{no_line: "^("}]}'
+invalid_case "absolute file" 'file must be relative to the render root: /etc/selftest/app\.conf$' \
+    'render:
+  - {file: /etc/selftest/app.conf, format: lines, checks: [{no_line: x}]}'
+invalid_case "must_fail without message" '^error: inv/expectations\.yaml: must_fail\[0\]: missing message$' \
+    'must_fail:
+  - {unset: BBB_DOMAIN}'
+invalid_case "must_fail set of an engine variable" 'must_fail\[0\]: set: PATH is read by the engine' \
+    'must_fail:
+  - {set: {PATH: /nowhere}, message: x}'
+invalid_case "uid not UID:GID" '^error: inv/expectations\.yaml: uid: user must be' \
+    'uid: {user: nobody}'
+invalid_case "not a mapping" '^error: inv/expectations\.yaml: not a YAML mapping' \
+    '- a'
+if grep -q '^UPDATED\|^PASS\|^EXPECT' "$WORK/out"; then
+    fail "invalid expectations: nothing is rendered" "$OUT"
+else
+    pass "invalid expectations: nothing is rendered"
+fi
+rm -rf "$ROOT/inv"
+
+# --- expectations: json, properties syntax, leaked values, uid ---------------------------------
+# Probe image: writes fixed json and properties files and its UID; with PROBE_FAIL set, prints it
+# and exits 1 (an entrypoint that leaks a value); exits 3 as UID 4242.
+mkdir -p "$WORK/probe"
+cat >"$WORK/probe/probe.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+out="$2/etc/probe"
+mkdir -p "$out"
+printf '%s\n' '{"port": 4, "name": "x", "list": [1, 2]}' >"$out/app.json"
+printf '%s\n' '# comment = 1' '! other = 2' 'colon: c' 'space s' 'dup=first' 'dup=second' \
+    'cont = a\' '    b' 'empty=' >"$out/app.properties"
+if [ -n "${PROBE_FAIL:-}" ]; then printf 'probe: %s\n' "$PROBE_FAIL" >&2; exit 1; fi
+[ "$(id -u)" != 4242 ] || exit 3
+id -u >"$out/uid.txt"
+EOF
+cat >"$WORK/probe/Dockerfile" <<EOF
+FROM $BASE_IMAGE
+COPY probe.sh /usr/local/bin/probe.sh
+RUN chmod 0755 /usr/local/bin/probe.sh
+ENTRYPOINT ["/usr/local/bin/probe.sh"]
+EOF
+PROBE=localhost/bbb-golden-probe:test
+"$ENGINE" build -q -t "$PROBE" "$WORK/probe" >/dev/null
+newcase probe "$PROBE" PROBE_UNUSED=1
+run --update probe
+probe() { # expectations-yaml
+    printf '%s\n' "$1" >"$ROOT/probe/expectations.yaml"
+    run probe
+}
+
+probe 'render:
+  - file: etc/probe/app.json
+    format: json
+    checks:
+      - {path: .port, equals: 4}
+      - {path: .name, matches: "^x$"}
+      - {path: .missing, absent: true}
+  - file: etc/probe/app.properties
+    format: properties
+    checks:
+      - {key: colon, equals: c}
+      - {key: space, equals: s}
+      - {key: dup, equals: first}
+      - {key: cont, equals: ab}
+      - {key: empty, equals: ""}
+      - {key: "#", absent: true}
+      - {key: "!", absent: true}'
+expect_line "json and properties syntax: EXPECT-PASS" "^EXPECT-PASS probe$"
+expect_rc "json and properties syntax: exit 0" 0
+
+probe 'render:
+  - file: etc/probe/app.json
+    format: json
+    checks:
+      - {path: .port, equals: "4"}
+      - {path: ".list[]", equals: 1}
+      - {path: .name, absent: true}'
+expect_line "json equals compares the tag" '^EXPECT-FAIL probe: etc/probe/app\.json: \.port: expected 4 \(!!str\), got 4 \(!!int\)$'
+expect_line "json path selecting several nodes" '^EXPECT-FAIL probe: etc/probe/app\.json: \.list\[\]: selects 2 nodes$'
+expect_line "json absent violated" '^EXPECT-FAIL probe: etc/probe/app\.json: \.name: present \(x\), expected absent$'
+expect_rc "json violations: exit 1" 1
+
+probe 'render:
+  - file: etc/probe/uid.txt
+    format: json
+    checks: [{path: .a, equals: 1}]
+  - file: etc/probe/app.properties
+    format: lines
+    checks: [{contains_line: "^nothing$"}]'
+expect_line "json format on a non-json file" '^EXPECT-FAIL probe: etc/probe/uid\.txt: not a json mapping or list$'
+expect_line "lines contains_line violated" '^EXPECT-FAIL probe: etc/probe/app\.properties: \^nothing\$: no matching line$'
+
+probe 'must_fail:
+  - {set: {PROBE_FAIL: "first\nleakedline"}, message: "probe: "}'
+expect_line "must_fail: leaked set value reported" '^EXPECT-FAIL probe: must_fail: set PROBE_FAIL: output contains the value of PROBE_FAIL$'
+if grep -q leakedline "$WORK/out"; then fail "must_fail: leaked value not shown by the runner" "$OUT"; else pass "must_fail: leaked value not shown by the runner"; fi
+
+probe 'uid: {user: "12345:12345"}'
+expect_line "uid: output depending on the UID reported" '^EXPECT-FAIL probe: uid: render as 12345:12345 differs from the default render: etc/probe/uid\.txt$'
+
+probe 'uid: {user: "4242:4242"}'
+expect_line "uid: render failing as the UID reported" '^EXPECT-FAIL probe: uid: render as 4242:4242: exit 3$'
+
+newcase nonrootuid "$IMAGE" BBB_DOMAIN=bbb.example.com SELFTEST_SECRET=fixturesecret
+run --update nonrootuid
+printf '%s\n' 'uid: {user: "12345:12345"}' >"$ROOT/nonrootuid/expectations.yaml"
+run nonrootuid
+expect_line "uid: non-root image with 0600 files and symlinks: EXPECT-PASS" "^EXPECT-PASS nonrootuid$"
+if [ -z "$(find "$RUN_TMP" -mindepth 1 -print -quit)" ]; then
+    pass "expectations: runner leaves no temporary files"
+else
+    fail "expectations: runner leaves no temporary files" "$(find "$RUN_TMP" -ls)"
+fi
+
 echo
 echo "$PASSED passed, $FAILED failed"
 [ "$FAILED" -eq 0 ]
