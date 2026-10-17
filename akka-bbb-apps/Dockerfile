@@ -1,37 +1,73 @@
 # syntax=docker/dockerfile:1
-# 1. Build stage:
+# akka-apps (bbb-apps-akka): upstream's sbt universal package on the shared Java 21 base.
+#
+# Build with bake (docker/bake/apps-akka.hcl defines the named contexts):
+#   docker buildx bake -f docker-bake.hcl $(printf -- '-f %s ' docker/bake/*.hcl) apps-akka
+# or with podman (--format docker keeps the HEALTHCHECK), after building the two base targets:
+#   podman build -t bbb-common-message bbb-common-message
+#   podman build --build-context entrypoint-lib=docker/lib -t bbb-java-base docker/java-base
+#   podman build --format docker \
+#       --build-context bbb-common-message=container-image://localhost/bbb-common-message \
+#       --build-context java-base=container-image://localhost/bbb-java-base \
+#       --build-context html5-config=bigbluebutton-html5/private/config \
+#       -t bbb-apps-akka akka-bbb-apps
+#
+# Configuration: see docker/entrypoint.sh.
+
+# 1. Build: the files of the Debian package (build/packages-template/bbb-apps-akka/build.sh runs
+# `sbt debian:packageBin`, which packages this universal stage). bbb-common-message is
+# published in the build stage's local repositories.
+# DL3006: bbb-common-message is a named build context, not an image.
+# hadolint ignore=DL3006
 FROM bbb-common-message AS build
 
 WORKDIR /bbb-apps-akka
+# Dependencies first, so that a source change does not download them again.
+COPY build.sbt ./
+COPY project project
+RUN sbt update
+COPY src src
+RUN sbt Universal/stage
 
-COPY . .
+# Container wiring, applied to the shipped configuration as bbb-config's after-install edits
+# application.conf on bare metal: application.conf.patch (container host names, listen address,
+# values from the environment), and logback without the file appender (logs go to stdout).
+# Modes: the start script is 0744 in the stage, but any UID must run it (docker/README.md).
+# The Windows start script is dropped.
+COPY docker/application.conf.patch /tmp/
+WORKDIR /bbb-apps-akka/target/universal/stage/conf
+RUN git apply --verbose /tmp/application.conf.patch \
+    && sed -i '/<appender name="FILE"/,/<\/appender>/d; /<appender-ref ref="FILE"/d' logback.xml \
+    && if grep -q 'FILE' logback.xml; then echo "logback.xml: file appender not removed" >&2; exit 1; fi \
+    && rm ../bin/bbb-apps-akka.bat \
+    && chmod 0644 ./* \
+    && chmod 0755 ../bin/bbb-apps-akka
 
-# compile and unzip bin
-RUN sbt universal:packageBin \
-    && ls -la ./target/universal/ \
-    && unzip ./target/universal/bbb-apps-akka-0.0.4.zip -d /
-
-# 2. Runtime stage:
+# 2. Runtime
+# DL3006: java-base is a named build context, not an image.
+# hadolint ignore=DL3006
 FROM java-base
 
-RUN curl -L -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 && chmod a+x /usr/local/bin/yq
+# The package's directory (/usr/share/bbb-apps-akka: bin, lib, conf), root-owned and read-only.
+COPY --from=build /bbb-apps-akka/target/universal/stage /usr/share/bbb-apps-akka
+# akka-apps reads the HTML5 client settings and hands them to clients (ClientSettings.scala);
+# the override /etc/bigbluebutton/bbb-html5.yml is merged over them if mounted (Tier 3).
+# DL3022: html5-config is a named build context, not a stage.
+# hadolint ignore=DL3022
+COPY --from=html5-config --chmod=0644 settings.yml /usr/share/bigbluebutton/html5-client/private/config/settings.yml
+COPY --chmod=0755 docker/entrypoint.sh /entrypoint.sh
 
-COPY --from=build --chown=bigbluebutton /bbb-apps-akka-0.0.4 /bbb-apps-akka
-COPY --chown=bigbluebutton ./docker/bbb-apps-akka-docker.conf /bbb-apps-akka/conf/docker.conf
-COPY --chown=bigbluebutton ./docker/bbb-apps-akka-overwrite.conf /etc/bigbluebutton/bbb-apps-akka.conf.tmpl
-COPY --chown=bigbluebutton ./docker/entrypoint.sh /entrypoint.sh
+# As in the systemd unit (src/templates/systemloader/systemd/start-template).
+ENV MALLOC_ARENA_MAX=2
+WORKDIR /usr/share/bbb-apps-akka
 
-COPY --chown=bigbluebutton ./docker/logback.xml /bbb-apps-akka/conf/logback.xml
-
-# Create log directory owned by bigbluebutton user
-RUN mkdir -p logs \
- && chown -R bigbluebutton:bigbluebutton logs
-
-# Copy html5 default config
-RUN mkdir -p /usr/share/bigbluebutton/html5-client/private/config/
-COPY --chown=bigbluebutton:bigbluebutton --from=html5-config / /usr/share/bigbluebutton/html5-client/private/config/
-RUN chown -R bigbluebutton:bigbluebutton /usr/share/bigbluebutton/html5-client/private/config/
-
-USER bigbluebutton
-
+USER 998:998
+# HTTP API (healthz; userInfo for the Hasura auth hook; graphql-middleware session variables).
+EXPOSE 8901
+# Healthy when the HTTP API answers /healthz. Its 503 is accepted: /healthz turns 200 only once
+# bbb-web's keep-alive pings arrive through redis (ApiService.scala, BigBlueButtonActor.scala
+# handleCheckAlivePingSysMsg), which would make akka-apps' health depend on bbb-web.
+# bash's /dev/tcp: the base has no HTTP client.
+HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=3 \
+    CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8901 && printf 'GET /healthz HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\n\\r\\n' >&3 && head -n 1 <&3 | grep -qE '^HTTP/1\\.[01] (200|503) '"]
 ENTRYPOINT ["/entrypoint.sh"]
