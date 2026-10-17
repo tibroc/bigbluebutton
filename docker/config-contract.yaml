@@ -285,6 +285,41 @@ variables:
       - build/deb-helper.sh:136-152 @ 35cad46a9f — system group created without a fixed gid
       - Dockerfile:26-37 @ 1ecff54c7c — upstream recorder image group 998
 
+  - name: BBB_IMAGE_REGISTRY
+    tier: 2
+    required: false
+    secret: false
+    default: ghcr.io/bigbluebutton
+    pattern: '[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*'
+    setup: null
+    description: >-
+      Registry and namespace of the BBB images; compose uses
+      `${BBB_IMAGE_REGISTRY}/bbb-<image>:${BBB_IMAGE_TAG}`. Set `localhost` to run images built
+      locally with `docker buildx bake`, which tags them the same way.
+    consumers: [compose]
+    example: ghcr.io/bigbluebutton
+    status: draft
+    notes: Human decision 2026-10-17 (one registry and one tag for all BBB images).
+    sources:
+      - .env.example:1 @ 4e63aa2ff3 — the PR's IMAGE_REPO
+
+  - name: BBB_IMAGE_TAG
+    tier: 2
+    required: false
+    secret: false
+    default: '4.0.1'
+    pattern: '[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}'
+    setup: null
+    description: >-
+      Tag of all BBB images (third-party images such as redis and postgres are pinned in the
+      compose file). The default is the release the compose file belongs to; never `latest`.
+    consumers: [compose]
+    example: '4.0.1'
+    status: draft
+    notes: Human decision 2026-10-17. The default follows the release file of the same commit.
+    sources:
+      - bigbluebutton-config/bigbluebutton-release:1 @ 35cad46a9f — BIGBLUEBUTTON_RELEASE=4.0.1
+
   - name: BBB_WEB_CONVERSION_URL
     tier: 2
     required: false

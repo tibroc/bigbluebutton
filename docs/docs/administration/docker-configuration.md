@@ -247,6 +247,8 @@ Optional. Unset variables take the default shown.
 |---|---|---|---|
 | [`BBB_UID`](#bbb_uid) | no | `998` | User id of every container that writes the shared data volume (/var/bigbluebutton) and the recorder volume. Set it to the bigbluebutton user id of an existing bare-metal tree or NFS export to keep its ownership. |
 | [`BBB_GID`](#bbb_gid) | no | `998` | Group id belonging to BBB_UID. |
+| [`BBB_IMAGE_REGISTRY`](#bbb_image_registry) | no | `ghcr.io/bigbluebutton` | Registry and namespace of the BBB images; compose uses `${BBB_IMAGE_REGISTRY}/bbb-<image>:${BBB_IMAGE_TAG}`. Set `localhost` to run images built locally with `docker buildx bake`, which tags them the same way. |
+| [`BBB_IMAGE_TAG`](#bbb_image_tag) | no | `4.0.1` | Tag of all BBB images (third-party images such as redis and postgres are pinned in the compose file). The default is the release the compose file belongs to; never `latest`. |
 | [`BBB_WEB_CONVERSION_URL`](#bbb_web_conversion_url) | no | — | URL of the office document conversion service that bbb-web calls (ADR-13). Unset means office document conversion is disabled (PDF and images still work). |
 | [`BBB_WEB_PAGE_TOKEN_SECRET`](#bbb_web_page_token_secret) | no | — | HMAC key for presentation page tokens (pageTokenSecret). Unset means BBB_SHARED_SECRET, as upstream. |
 | [`BBB_WEB_MAX_HEAP_SIZE`](#bbb_web_max_heap_size) | no | `384m` | Java heap size of bbb-web (initial and maximum), JVM size syntax. |
@@ -291,6 +293,34 @@ Group id belonging to BBB_UID.
 - **Sources:**
   - `build/deb-helper.sh:136-152 @ 35cad46a9f` — system group created without a fixed gid
   - `Dockerfile:26-37 @ 1ecff54c7c` — upstream recorder image group 998
+
+### BBB_IMAGE_REGISTRY
+
+Registry and namespace of the BBB images; compose uses `${BBB_IMAGE_REGISTRY}/bbb-<image>:${BBB_IMAGE_TAG}`. Set `localhost` to run images built locally with `docker buildx bake`, which tags them the same way.
+
+- **Required:** no. **Secret:** no.
+- **Default:** `ghcr.io/bigbluebutton`
+- **Format:** `[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*` (extended regular expression, whole value)
+- **Example:** `ghcr.io/bigbluebutton`
+- **Used by:** compose
+- **Status:** draft
+- **Note:** Human decision 2026-10-17 (one registry and one tag for all BBB images).
+- **Sources:**
+  - `.env.example:1 @ 4e63aa2ff3` — the PR's IMAGE_REPO
+
+### BBB_IMAGE_TAG
+
+Tag of all BBB images (third-party images such as redis and postgres are pinned in the compose file). The default is the release the compose file belongs to; never `latest`.
+
+- **Required:** no. **Secret:** no.
+- **Default:** `4.0.1`
+- **Format:** `[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}` (extended regular expression, whole value)
+- **Example:** `4.0.1`
+- **Used by:** compose
+- **Status:** draft
+- **Note:** Human decision 2026-10-17. The default follows the release file of the same commit.
+- **Sources:**
+  - `bigbluebutton-config/bigbluebutton-release:1 @ 35cad46a9f` — BIGBLUEBUTTON_RELEASE=4.0.1
 
 ### BBB_WEB_CONVERSION_URL
 
