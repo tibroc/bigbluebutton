@@ -44,6 +44,7 @@ group "default" {
         "coturn",
         "livekit",
         "haproxy",
+        "shared-notes",
         "certbot",
     ]
 }
