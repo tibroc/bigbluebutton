@@ -3,7 +3,9 @@
 # /entrypoint.sh after it validated the environment.
 #
 # 1. Waits for the postgres service (PGHOST, PGPORT) and connects as the superuser with
-#    POSTGRES_PASSWORD.
+#    POSTGRES_PASSWORD. Takes an advisory lock that a separate psql session holds for the rest
+#    of the run, so that concurrent runs (a Kubernetes Job retry, `compose run` beside `up`)
+#    wait for each other. The session, and with it the lock, ends when this script exits.
 # 2. (Re)creates bbb_graphql, hasura_app and blocknote_app (recreate.sql) when the version
 #    recorded in the table public.bbb_db_init of the postgres database differs from this
 #    image's version, or one of the three databases is missing. Otherwise they are kept: a
@@ -22,6 +24,8 @@ BBB_LOG_TAG=db-init
 SQL_DIR=/usr/share/bbb-db-init
 WAIT_SECONDS=60
 DATABASES="'bbb_graphql', 'hasura_app', 'blocknote_app'"
+# Advisory lock key in the postgres database; any constant only db-init uses.
+LOCK_KEY=4245524
 
 version="$(cat "$SQL_DIR/version")"
 [ -n "$version" ] || bbb_die "empty image version in $SQL_DIR/version"
@@ -43,6 +47,19 @@ for ((i = 0; i < WAIT_SECONDS; i++)); do
 done
 pg_isready -q || bbb_die "postgres not ready after ${WAIT_SECONDS}s"
 psql_su -d postgres -At -c 'SELECT 1' >/dev/null
+
+# The lock session reads its commands from this script and keeps running until the script
+# exits and its end of the pipe closes. `\! echo locked` reports that the lock is held.
+coproc lock_session { psql_su -d postgres -At; }
+printf '%s\n' "DO \$\$ BEGIN
+    IF NOT pg_try_advisory_lock($LOCK_KEY) THEN
+        RAISE NOTICE 'db-init: another db-init run is in progress; waiting for it';
+        PERFORM pg_advisory_lock($LOCK_KEY);
+    END IF;
+END \$\$;" '\! echo locked' >&"${lock_session[1]}"
+reply=""
+read -r reply <&"${lock_session[0]}" || true
+[ "$reply" = locked ] || bbb_die "could not take the db-init lock in the postgres database"
 
 applied=""
 if [ "$(psql_su -d postgres -At -c "SELECT to_regclass('public.bbb_db_init') IS NOT NULL")" = t ]; then
