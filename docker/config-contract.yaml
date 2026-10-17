@@ -54,13 +54,14 @@ variables:
     setup: detect
     description: >-
       Public IPv4 address of the server. Left empty in .env, the setup container detects it and
-      writes it. LiveKit announces it as node_ip and coturn as external-ip.
+      writes it. LiveKit announces it as node_ip (its public ICE candidate) and coturn as
+      external-ip.
     consumers: [livekit, coturn, setup, preflight]
     example: 203.0.113.10
-    status: pending-g2
+    status: draft
     notes: >-
-      How LiveKit and coturn use it on a bridge network (node_ip candidate rewriting, coturn
-      relay address) is decided by spike RB-02 (ADR-06, OQ-12, OQ-14).
+      Tested with a public address on the server's interface (G2). A server behind 1:1 NAT
+      (floating IP) is untested.
     sources:
       - pkg/routing/node.go:51-53 @ 8d11efdfcd — livekit fails without node_ip (ErrIPNotSet)
       - cmd/server/main.go:44-99 @ 8d11efdfcd — livekit env NODE_IP
@@ -79,11 +80,11 @@ variables:
       check the AAAA record.
     consumers: [preflight]
     example: '2001:db8::10'
-    status: pending-g2
+    status: draft
     notes: >-
       The pattern checks the shape only (hex groups and colons), not full IPv6 syntax. Upstream
-      binds haproxy on IPv6 but configures no IPv6 address in LiveKit or coturn; whether
-      LiveKit or coturn need it in containers is UNVERIFIED and part of RB-02.
+      binds haproxy on IPv6 but configures no IPv6 address in LiveKit or coturn; public IPv6 in
+      containers is untested (UNVERIFIED).
     sources:
       - bbb-install.sh:568-575 @ 2547823185 — bbb-install requires IPv6 support
       - bbb-install.sh:920 @ 2547823185 — haproxy binds :::443
@@ -239,13 +240,14 @@ variables:
       so their configuration matches the running services.
     consumers: [compose, bbb-web, nginx, bbb-webrtc-sfu]
     example: recording
-    status: pending-g3
+    status: draft
     notes: >-
-      Which settings each feature changes is decision features-mapping (OQ-18). Set it only in
-      .env: a value exported in the shell can make profiles and image configuration disagree.
+      What each feature starts and which settings the images derive from it is listed in
+      `features`. Set it in .env: Docker Compose then keeps profiles and image configuration
+      consistent.
     sources:
       - build/packages-template/bigbluebutton/build.sh:16-33 @ 35cad46a9f — recording is part of the default install, webhooks is not
-      - bigbluebutton-web/grails-app/conf/bigbluebutton.properties:319 @ 35cad46a9f — disableRecordingDefault, candidate for the recording flag
+      - bigbluebutton-web/grails-app/conf/bigbluebutton.properties:319 @ 35cad46a9f — disableRecordingDefault, set from the recording feature
 
   # ------------------------------------------------------------------------------- Tier 2
   - name: BBB_UID
@@ -333,7 +335,7 @@ variables:
     sources:
       - build/packages-template/bbb-web/bbb-web.env:4-5 @ 35cad46a9f — INITIAL_HEAP_SIZE / MAX_HEAP_SIZE
 
-  - name: RECORDING_RETENTION_DAYS
+  - name: RECORDING_RAW_RETENTION_DAYS
     tier: 2
     required: false
     secret: false
@@ -341,12 +343,14 @@ variables:
     pattern: '[0-9]{1,5}'
     setup: null
     description: >-
-      Recording cleanup after N days; 0 disables it. Upstream semantics: deletes the raw data
-      of recordings published more than N days ago, not the published recordings.
+      Deletes the raw recording data of recordings published more than N days ago (upstream
+      published_days); 0 disables it. Published recordings are kept.
     consumers: [recording]
     example: '14'
-    status: pending-g3
-    notes: Semantics and name are decision recording-retention.
+    status: draft
+    notes: >-
+      Deleting published recordings stays a manual task, as on bare metal (bbb-record
+      --delete).
     sources:
       - bigbluebutton-config/cron.daily/bigbluebutton:29,94-123 @ 35cad46a9f — published_days
       - docs/docs/administration/customize.md:64 @ 35cad46a9f — documented setting
@@ -392,58 +396,47 @@ variables:
     pattern: '[1-9][0-9]{0,4}'
     setup: null
     description: >-
-      LiveKit WebRTC media port (UDP mux), published 1:1. Upstream uses the range 16384-32768
-      instead.
+      LiveKit WebRTC media port (one multiplexed UDP port for all clients), published 1:1. The
+      LiveKit image also sets port_range_start/end to 0, otherwise LiveKit ignores it. There is
+      no ICE-TCP; clients without UDP use TURN over 443.
     consumers: [livekit, compose]
     example: '7882'
-    status: pending-g2
+    status: draft
+    notes: Upstream uses the range 16384-32768 on the host network instead.
     sources:
-      - config-sample.yaml:78-86 @ 8d11efdfcd — rtc.udp_port
+      - config-sample.yaml:78-86 @ 8d11efdfcd — rtc.udp_port; port_range_start and end must not be set
       - build/packages-template/bbb-livekit/livekit.yaml:3-13 @ 35cad46a9f — packaged port range
-
-  - name: LIVEKIT_RTC_TCP_PORT
-    tier: 2
-    required: false
-    secret: false
-    default: '7881'
-    pattern: '[1-9][0-9]{0,4}'
-    setup: null
-    description: LiveKit ICE-TCP port, published 1:1. Upstream disables ICE-TCP (tcp_port 0).
-    consumers: [livekit, compose]
-    example: '7881'
-    status: pending-g2
-    sources:
-      - pkg/config/config.go:529-538 @ 8d11efdfcd — tcp_port default 7881
-      - build/packages-template/bbb-livekit/livekit.yaml:3-13 @ 35cad46a9f — packaged tcp_port 0
 
   - name: TURN_RELAY_PORT_MIN
     tier: 2
     required: false
     secret: false
-    default: '32769'
+    default: '49160'
     pattern: '[1-9][0-9]{0,4}'
     setup: null
-    description: First port of the coturn relay range (min-port).
-    consumers: [coturn, compose]
-    example: '32769'
-    status: pending-g2
-    notes: Range and networking (host network vs bridge) follow RB-02 (OQ-14).
+    description: >-
+      First port of the coturn relay range (min-port). The range is used on the internal
+      network only and is not published.
+    consumers: [coturn]
+    example: '49160'
+    status: draft
+    notes: Upstream uses 32769-65535 on the host network.
     sources:
-      - bbb-install.sh:1916-1917 @ 2547823185 — min-port/max-port 32769-65535
+      - bbb-install.sh:1916-1917 @ 2547823185 — min-port/max-port 32769-65535 upstream
 
   - name: TURN_RELAY_PORT_MAX
     tier: 2
     required: false
     secret: false
-    default: '65535'
+    default: '49199'
     pattern: '[1-9][0-9]{0,4}'
     setup: null
-    description: Last port of the coturn relay range (max-port).
-    consumers: [coturn, compose]
-    example: '65535'
-    status: pending-g2
+    description: Last port of the coturn relay range (max-port); internal only, not published.
+    consumers: [coturn]
+    example: '49199'
+    status: draft
     sources:
-      - bbb-install.sh:1916-1917 @ 2547823185 — min-port/max-port 32769-65535
+      - bbb-install.sh:1916-1917 @ 2547823185 — min-port/max-port 32769-65535 upstream
 
   - name: POSTGRES_BBB_CORE_PASSWORD
     tier: 2
@@ -453,10 +446,10 @@ variables:
     pattern: '[A-Za-z0-9]{32,}'
     setup: generate
     description: Password of the PostgreSQL role bbb_core (akka-apps).
-    consumers: [akka-apps, db-init]
+    consumers: [postgres, db-init, akka-apps]
     example: null
-    status: pending-g3
-    notes: Exists only with option (b) of decision postgres-role-passwords; needs a fixture first.
+    status: draft
+    notes: Generated by setup and applied by db-init when it (re)creates the role.
     sources:
       - akka-bbb-apps/src/universal/conf/application.conf:49-53 @ 35cad46a9f — postgres properties
       - build/packages-template/bbb-graphql-server/after-install.sh:24-26 @ 35cad46a9f — role created with a fixed value
@@ -469,10 +462,10 @@ variables:
     pattern: '[A-Za-z0-9]{32,}'
     setup: generate
     description: Password of the PostgreSQL role hasura_app (Hasura metadata database).
-    consumers: [graphql-server, db-init]
+    consumers: [postgres, db-init, graphql-server]
     example: null
-    status: pending-g3
-    notes: Exists only with option (b) of decision postgres-role-passwords; needs a fixture first.
+    status: draft
+    notes: Generated by setup and applied by db-init when it (re)creates the role.
     sources:
       - build/packages-template/bbb-graphql-server/hasura-config.env:1 @ 35cad46a9f — HASURA_GRAPHQL_DATABASE_URL
       - build/packages-template/bbb-graphql-server/after-install.sh:16-22 @ 35cad46a9f — role created with a fixed value
@@ -485,12 +478,12 @@ variables:
     pattern: '[A-Za-z0-9]{32,}'
     setup: generate
     description: Password of the PostgreSQL role bbb_hasura (BBB data source of Hasura).
-    consumers: [graphql-server, db-init]
+    consumers: [postgres, db-init, graphql-server]
     example: null
-    status: pending-g3
+    status: draft
     notes: >-
-      Exists only with option (b) of decision postgres-role-passwords. The DSN is a literal in
-      the Hasura metadata (no from_env); the image would rewrite it before metadata apply.
+      Generated by setup and applied by db-init. The DSN is a literal in the Hasura metadata (no
+      from_env); the graphql-server image rewrites it before metadata apply.
     sources:
       - bbb-graphql-server/metadata/databases/databases.yaml:19 @ 35cad46a9f — literal DSN
       - build/packages-template/bbb-graphql-server/after-install.sh:33-35 @ 35cad46a9f — role created with a fixed value
@@ -503,10 +496,10 @@ variables:
     pattern: '[A-Za-z0-9]{32,}'
     setup: generate
     description: Password of the PostgreSQL role blocknote_app (shared notes).
-    consumers: [shared-notes, db-init]
+    consumers: [postgres, db-init, shared-notes]
     example: null
-    status: pending-g3
-    notes: Exists only with option (b) of decision postgres-role-passwords; needs a fixture first.
+    status: draft
+    notes: Generated by setup and applied by db-init when it (re)creates the role.
     sources:
       - bbb-shared-notes-server/config/default.yml:39-44 @ 35cad46a9f — postgres.password
       - build/packages-template/bbb-shared-notes-server/after-install.sh:12-20 @ 35cad46a9f — role created with a fixed value
@@ -533,7 +526,7 @@ derived:
     description: >-
       Compose profiles follow the features. Written into .env as a self-reference; do not
       change it.
-    status: pending-g3
+    status: draft
     sources:
       - build/packages-template/bigbluebutton/build.sh:16-33 @ 35cad46a9f — default package set (recording in, webhooks out)
 
@@ -600,11 +593,27 @@ derived:
     inputs: [BBB_PUBLIC_IPV4]
     env: NODE_IP
     targets: ['livekit: env NODE_IP (rtc.node_ip, with use_external_ip false)']
-    description: Address LiveKit announces in its ICE candidates.
-    status: pending-g2
+    description: Public address LiveKit announces in its ICE candidates.
+    status: draft
     sources:
       - cmd/server/main.go:44-99 @ 8d11efdfcd — NODE_IP
       - config-sample.yaml:78-86 @ 8d11efdfcd — use_external_ip takes precedence over node_ip
+
+  - name: livekit_rtc
+    formula: 'rtc.udp_port=${LIVEKIT_RTC_UDP_PORT}, rtc.port_range_start=0, rtc.port_range_end=0, rtc.tcp_port=0, rtc.advertise_internal_ip=true'
+    inputs: [LIVEKIT_RTC_UDP_PORT]
+    targets: ['livekit: rtc block of the image base livekit.yaml']
+    description: >-
+      One UDP port, no port range (LiveKit ignores udp_port while a range is set), no ICE-TCP,
+      and the bridge address advertised next to node_ip as a constant, so recorder and coturn
+      reach LiveKit on the bridge instead of through the public address. External clients also
+      see the unreachable bridge address as a candidate (harmless).
+    status: draft
+    sources:
+      - config-sample.yaml:74,78-86 @ 8d11efdfcd — advertise_internal_ip, udp_port
+      - pkg/rtcconfig/config.go:56 @ f234b534b0 — advertise_internal_ip field
+      - pkg/rtcconfig/webrtc_config.go:110-115 @ f234b534b0 — explicit node_ip keeps the internal candidate with it
+      - build/packages-template/bbb-livekit/livekit.yaml:3-8 @ 35cad46a9f — packaged range and tcp_port 0
 
   - name: sfu_livekit
     formula: 'LIVEKIT_KEY=${LIVEKIT_API_KEY}, LIVEKIT_SECRET=${LIVEKIT_API_SECRET}, LIVEKIT_BBB_DOMAIN=${BBB_DOMAIN}'
@@ -670,13 +679,16 @@ derived:
       - build/packages-template/bbb-graphql-server/after-install.sh:44-57 @ 35cad46a9f
 
   - name: coturn_config
-    formula: 'static-auth-secret=${TURN_SECRET}, realm=${BBB_DOMAIN}, external-ip=${BBB_PUBLIC_IPV4}, min-port/max-port from TURN_RELAY_PORT_MIN/MAX'
+    formula: 'static-auth-secret=${TURN_SECRET}, realm=${BBB_DOMAIN}, external-ip=${BBB_PUBLIC_IPV4}, min-port=${TURN_RELAY_PORT_MIN}, max-port=${TURN_RELAY_PORT_MAX}, allowed-peer-ip=LiveKit bridge address (all other peers denied)'
     inputs: [TURN_SECRET, BBB_DOMAIN, BBB_PUBLIC_IPV4, TURN_RELAY_PORT_MIN, TURN_RELAY_PORT_MAX]
     targets: ['coturn: /etc/turnserver.conf']
-    description: coturn settings bbb-install writes; networking details follow RB-02.
-    status: pending-g2
+    description: >-
+      coturn on the bridge network: only 3478/udp+tcp published, relay range internal, relaying
+      only to LiveKit's bridge address (upstream allows only the host address).
+    status: draft
     sources:
       - bbb-install.sh:1904-1945 @ 2547823185 — turnserver.conf content
+      - bbb-install.sh:1937-1941 @ 2547823185 — denied-peer-ip all, allowed-peer-ip host
       - docs/docs/administration/turn-server.md:169-184 @ 35cad46a9f
 
   - name: page_token_secret
@@ -689,11 +701,11 @@ derived:
       - bigbluebutton-web/grails-app/conf/bigbluebutton.properties:450-452 @ 35cad46a9f
 
   - name: feature_flags
-    formula: 'per feature in ${BBB_FEATURES}; mapping is decision features-mapping'
+    formula: 'per feature in ${BBB_FEATURES}, as listed in features'
     inputs: [BBB_FEATURES]
     targets: ['bbb-web: recording settings', 'nginx: feature-dependent location fragments', 'compose: profiles']
     description: Images switch configuration with the enabled features.
-    status: pending-g3
+    status: draft
     sources:
       - bigbluebutton-web/grails-app/conf/bigbluebutton.properties:319,324 @ 35cad46a9f — disableRecordingDefault, autoStartRecording
 
@@ -724,8 +736,8 @@ internal:
   - name: BBBRECORDER_LIVEKIT_HOST
     consumer: bbb-webrtc-recorder
     value: 'ws://livekit:7880'
-    description: LiveKit signaling for the recorder, internal (not through nginx).
-    status: pending-g2
+    description: LiveKit signaling for the recorder, internal (not through nginx); media stays on the bridge.
+    status: draft
     sources:
       - internal/config/config.go:39-105 @ 1ecff54c7c — default ws://localhost:7880
 
@@ -828,6 +840,16 @@ internal:
     status: draft
     sources:
       - record-and-playback/core/scripts/bigbluebutton.yml:10,13-15 @ 35cad46a9f
+
+  - name: 'livekit: log_level'
+    consumer: livekit
+    value: info
+    description: >-
+      Never debug by default: LiveKit sends the TURN password in every join response, and
+      debug logs contain it.
+    status: draft
+    sources:
+      - build/packages-template/bbb-livekit/livekit.yaml:2 @ 35cad46a9f — upstream log_level info
 
   - name: 'livekit: webhook.urls'
     consumer: livekit
@@ -933,9 +955,10 @@ overrides:
     format: yaml
     merge: >-
       yq-go deep merge (image default * override) at start, as the upstream unit does. The
-      image must not use LIVEKIT_CONFIG, which would silently replace both files.
+      image must not use LIVEKIT_CONFIG, which would silently replace both files. An override
+      that sets a port range again disables the UDP port (keep port_range_start/end at 0).
     support: supported
-    status: pending-g2
+    status: draft
     sources:
       - build/packages-template/bbb-livekit/livekit-server.service:9-10 @ 35cad46a9f
       - cmd/server/main.go:323-326 @ 8d11efdfcd — config body wins over the file
@@ -944,8 +967,12 @@ overrides:
     path: /etc/bigbluebutton/bbb-webrtc-sfu/production.yml
     format: yaml
     merge: >-
-      node-config: merged key by key over the image's config, arrays replaced; env variables
-      beat the file. The image's base config drops the FreeSWITCH adapter (LX-4).
+      node-config: merged key by key over the image's config, arrays replaced. The image's base
+      config drops the FreeSWITCH adapter (LX-4).
+    env_precedence: >-
+      Env variables beat this file: livekit.key, livekit.secret, livekit.bbbDomain,
+      livekit.host, redis.host and clientHost come from the image's env and cannot be changed
+      here.
     support: supported
     status: draft
     sources:
@@ -989,11 +1016,10 @@ overrides:
     path: /etc/default/bigbluebutton-cron-config
     format: shell
     merge: >-
-      Shell variables sourced by the cleanup script. In containers the image writes it from
-      RECORDING_RETENTION_DAYS; whether an admin file may replace it follows decision
-      recording-retention.
-    support: pending
-    status: pending-g3
+      Shell variables sourced by the cleanup script on bare metal. In containers the recording
+      image writes it from RECORDING_RAW_RETENTION_DAYS; set the variable instead.
+    support: not-supported
+    status: draft
     sources:
       - bigbluebutton-config/cron.daily/bigbluebutton:29,94-123 @ 35cad46a9f
 
@@ -1002,7 +1028,11 @@ overrides:
     format: yaml
     merge: >-
       node-config: merged key by key over config/default.yml (needs NODE_ENV=production; local.yml
-      also works, default.yml does not). Env variables beat the file (LX-2).
+      also works, default.yml does not).
+    env_precedence: >-
+      Env variables beat this file (LX-2): bbb.serverDomain, bbb.sharedSecret, bbb.auth2_0
+      (BEARER_AUTH), redis host and the API bind address come from the image's env and cannot
+      be changed here.
     support: supported
     status: draft
     sources:
@@ -1023,111 +1053,109 @@ overrides:
   - component: coturn
     path: /etc/turnserver.conf
     format: ini
-    merge: Upstream has no override (bbb-install writes the whole file). Container behaviour follows RB-02.
+    merge: >-
+      Upstream has no override (bbb-install writes the whole file). The coturn image renders it
+      from the contract; whether a mounted file may replace it is left to the coturn image task.
     support: pending
-    status: pending-g2
+    status: draft
     sources:
       - bbb-install.sh:1904-1945 @ 2547823185
 
 # --------------------------------------------------------------------------------------------
-# decisions_needed: open questions for G3. Variables they affect carry status pending-g3.
+# features: what each BBB_FEATURES entry starts (compose profile) and which settings the images
+# derive from it (G3 decision features-mapping).
 # --------------------------------------------------------------------------------------------
-decisions_needed:
+features:
+  - name: recording
+    services: [bbb-webrtc-recorder, recording (rap starter, workers, caption inbox), recording cleanup]
+    settings:
+      - 'bbb-web: disableRecordingDefault=false with the feature, true without it (record=true in the API is then ignored)'
+      - 'nginx: playback and recording locations only with the feature'
+    description: Records meetings and processes them into the presentation format. On by default, as on bare metal.
+    status: draft
+    sources:
+      - bigbluebutton-web/grails-app/conf/bigbluebutton.properties:317-319 @ 35cad46a9f — disableRecordingDefault semantics
+      - build/packages-template/bbb-playback-presentation/build.sh:24-34 @ 35cad46a9f — presentation.nginx location
+      - build/packages-template/bigbluebutton/build.sh:16-33 @ 35cad46a9f — recording is in the default package set
+
+  - name: webhooks
+    services: [webhooks]
+    settings:
+      - 'nginx: location /bigbluebutton/api/hooks only with the feature'
+    description: bbb-webhooks, optional as on bare metal.
+    status: draft
+    sources:
+      - build/packages-template/bbb-webhooks/webhooks.nginx:2-3 @ 35cad46a9f — nginx route
+      - build/packages-template/bigbluebutton/build.sh:16-33 @ 35cad46a9f — not in the default package set
+
+  - name: greenlight
+    services: [greenlight, its database]
+    settings: []
+    description: >-
+      Greenlight front end. No BBB image changes its configuration; greenlight reaches the API
+      at server_url with BBB_SHARED_SECRET.
+    status: draft
+    sources: []
+
+  - name: monitoring
+    services: [prometheus exporter]
+    settings: []
+    description: Metrics exporter. No BBB image changes its configuration.
+    status: draft
+    sources: []
+
+  - name: external-proxy
+    services: [haproxy is not started]
+    settings: []
+    description: >-
+      For an existing reverse proxy: nginx is published on a local port instead of haproxy on
+      443; ACME_EMAIL is not used. TURN over 443 then needs the existing proxy.
+    status: draft
+    sources: []
+
+# --------------------------------------------------------------------------------------------
+# decided: questions of the draft, decided at G3 (2026-10-17).
+# --------------------------------------------------------------------------------------------
+decided:
   - id: postgres-role-passwords
-    question: >-
-      The PostgreSQL roles bbb_core, hasura_app, bbb_hasura and blocknote_app use fixed public
-      passwords upstream, and the bbb_hasura DSN is a literal in the Hasura metadata. Keep the
-      upstream values or generate secrets?
-    options:
-      - id: a
-        text: >-
-          Upstream values, no variables. Simplest, parity with bare metal; any container on the
-          bbb network that reaches postgres can use the roles.
-      - id: b
-        text: >-
-          One generated Tier 2 secret per role (POSTGRES_BBB_CORE_PASSWORD,
-          POSTGRES_HASURA_APP_PASSWORD, POSTGRES_BBB_HASURA_PASSWORD,
-          POSTGRES_BLOCKNOTE_PASSWORD). setup generates them, db-init sets them; the graphql
-          image rewrites the metadata DSN before metadata apply. Needs four new fixtures.
-      - id: c
-        text: One generated secret shared by all application roles (one variable, less isolation).
-    recommendation: >-
-      b. db-init recreates the roles on every version change anyway (ADR-14), so generated
-      passwords cost nothing at upgrade time, and admins never see them (Tier 2, generated).
+    date: '2026-10-17'
+    choice: b
+    decision: >-
+      One generated Tier 2 secret per PostgreSQL role; setup generates them, db-init applies
+      them; the graphql-server image rewrites the Hasura metadata DSN.
     affects: [POSTGRES_BBB_CORE_PASSWORD, POSTGRES_HASURA_APP_PASSWORD, POSTGRES_BBB_HASURA_PASSWORD, POSTGRES_BLOCKNOTE_PASSWORD]
-    related: [G3]
 
   - id: recording-retention
-    question: >-
-      Upstream published_days deletes the raw data of recordings published more than N days
-      ago; published recordings stay. The contract draft described deleting published
-      recordings. Which semantics and name?
-    options:
-      - id: a
-        text: >-
-          Upstream semantics, renamed RECORDING_RAW_RETENTION_DAYS (default 14); deleting
-          published recordings stays a documented manual recipe, as upstream.
-      - id: b
-        text: Upstream semantics under the name RECORDING_RETENTION_DAYS.
-      - id: c
-        text: >-
-          Two variables: raw-data retention (upstream) and an opt-in published-recording
-          retention (0 = keep forever).
-    recommendation: >-
-      a. Same behaviour as bare metal, and the name says what is deleted. A published-recording
-      retention can be added later without breaking anyone.
-    affects: [RECORDING_RETENTION_DAYS]
-    related: [G3]
+    date: '2026-10-17'
+    choice: a
+    decision: >-
+      Upstream semantics (raw data of published recordings) under the name
+      RECORDING_RAW_RETENTION_DAYS, default 14; deleting published recordings stays manual.
+    affects: [RECORDING_RAW_RETENTION_DAYS]
 
   - id: features-mapping
-    question: >-
-      Which settings does each BBB_FEATURES entry change, and where do images read the feature
-      list from (OQ-18: a shell-exported BBB_FEATURES can disagree with COMPOSE_PROFILES)?
-    options:
-      - id: a
-        text: >-
-          Features only switch profiles; images ignore them. bbb-web would still offer
-          recording without the recording services.
-      - id: b
-        text: >-
-          Images map features to settings: without recording, bbb-web sets
-          disableRecordingDefault=true and nginx drops the playback locations; with it,
-          upstream defaults. Images read BBB_FEATURES; docs say to set it only in .env, and
-          preflight warns if the shell exports it.
-      - id: c
-        text: As b, but images read the profile list compose actually used (COMPOSE_PROFILES), pending RB-00.
-    recommendation: >-
-      b now (simple, testable with render-only), revisit c after RB-00 shows Docker Compose's
-      behaviour.
+    date: '2026-10-17'
+    choice: b
+    decision: >-
+      Images map BBB_FEATURES to settings as listed in features; images read BBB_FEATURES, set
+      in .env (Docker Compose keeps profiles and image env consistent).
     affects: [BBB_FEATURES]
-    related: [OQ-18, G3]
 
   - id: value-patterns
-    question: >-
-      Each variable has a value pattern (OQ-23). Adopt the patterns, and how are they enforced?
-    options:
-      - id: a
-        text: Entrypoints call bbb_require_match with the contract pattern; a bad value stops the container naming the variable.
-      - id: b
-        text: Only setup and preflight check the patterns; entrypoints check presence only.
-      - id: c
-        text: Warn only.
-    recommendation: >-
-      a. Values are substituted verbatim into config files; the pattern is the injection guard,
-      and setup/preflight reuse the same patterns.
+    date: '2026-10-17'
+    choice: a
+    decision: >-
+      Every entrypoint enforces the contract pattern with bbb_require_match; setup and
+      preflight use the same patterns.
     affects: [BBB_DOMAIN, BBB_PUBLIC_IPV4, BBB_SHARED_SECRET, TURN_SECRET, ACME_EMAIL, BBB_FEATURES]
-    related: [OQ-23, G3]
 
   - id: env-vs-override-precedence
-    question: >-
-      For node-config services (bbb-webhooks, bbb-webrtc-sfu) env variables beat Tier 3 files,
-      the reverse of "override files win" elsewhere. Accept and document, or make entrypoints
-      skip env for keys present in the Tier 3 file?
-    options:
-      - id: a
-        text: Accept and document per component (the reference page lists it).
-      - id: b
-        text: Entrypoints inspect the Tier 3 file with yq and do not export env for keys it sets.
-    recommendation: a. Upstream behaviour, no extra logic in entrypoints.
+    date: '2026-10-17'
+    choice: a
+    decision: >-
+      Upstream behaviour: for node-config services env beats Tier 3 files; documented per
+      component (env_precedence of the override).
     affects: [WEBHOOKS_BEARER_AUTH]
-    related: [LX-2, G3]
+
+# decisions_needed: questions still open. None after G3.
+decisions_needed: []
