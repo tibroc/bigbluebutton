@@ -32,7 +32,7 @@ variables:
     description: >-
       Public hostname of the server (fully qualified, no scheme, no port). All public URLs, the
       TLS certificate, the TURN realm and the TURN URIs handed to clients are derived from it.
-    consumers: [bbb-web, akka-apps, haproxy, coturn, bbb-webrtc-sfu, recording, webhooks, setup, preflight]
+    consumers: [bbb-web, akka-apps, haproxy, certbot, coturn, bbb-webrtc-sfu, recording, webhooks, setup, preflight]
     example: bbb.example.com
     status: draft
     sources:
@@ -216,7 +216,7 @@ variables:
     description: >-
       Contact e-mail for the Let's Encrypt account of the TLS certificate. Not needed with the
       external-proxy feature.
-    consumers: [certificates]
+    consumers: [certbot]
     example: admin@example.com
     status: draft
     notes: >-
@@ -482,7 +482,7 @@ variables:
     pattern: '[A-Za-z0-9]{32,}'
     setup: generate
     description: Password of the PostgreSQL role bbb_core (akka-apps).
-    consumers: [postgres, db-init, akka-apps]
+    consumers: [db-init, akka-apps]
     example: null
     status: draft
     notes: >-
@@ -499,7 +499,7 @@ variables:
     pattern: '[A-Za-z0-9]{32,}'
     setup: generate
     description: Password of the PostgreSQL role hasura_app (Hasura metadata database).
-    consumers: [postgres, db-init, graphql-server]
+    consumers: [db-init, graphql-server]
     example: null
     status: draft
     notes: >-
@@ -516,7 +516,7 @@ variables:
     pattern: '[A-Za-z0-9]{32,}'
     setup: generate
     description: Password of the PostgreSQL role bbb_hasura (BBB data source of Hasura).
-    consumers: [postgres, db-init, graphql-server]
+    consumers: [db-init, graphql-server]
     example: null
     status: draft
     notes: >-
@@ -535,7 +535,7 @@ variables:
     pattern: '[A-Za-z0-9]{32,}'
     setup: generate
     description: Password of the PostgreSQL role blocknote_app (shared notes).
-    consumers: [postgres, db-init, shared-notes]
+    consumers: [db-init, shared-notes]
     example: null
     status: draft
     notes: >-
@@ -1097,9 +1097,11 @@ overrides:
     path: /etc/turnserver.conf
     format: ini
     merge: >-
-      Upstream has no override (bbb-install writes the whole file). The coturn image renders it
-      from the contract; whether a mounted file may replace it is left to the coturn image task.
-    support: pending
+      Upstream has no override (bbb-install writes the whole file, and admins edit it in place).
+      A file mounted at this path replaces the rendered one as a whole: the image uses it as is,
+      renders nothing and logs a warning that the contract values are not applied (human
+      decision 2026-10-17).
+    support: supported
     status: draft
     sources:
       - bbb-install.sh:1904-1945 @ 2547823185
@@ -1148,11 +1150,11 @@ features:
     sources: []
 
   - name: external-proxy
-    services: [haproxy is not started]
+    services: [haproxy and certbot are not started]
     settings: []
     description: >-
       For an existing reverse proxy: nginx is published on a local port instead of haproxy on
-      443; ACME_EMAIL is not used. TURN over 443 then needs the existing proxy.
+      443; certbot does not run and ACME_EMAIL is not used. TURN over 443 then needs the existing proxy.
     status: draft
     sources: []
 
