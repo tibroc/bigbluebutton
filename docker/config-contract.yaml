@@ -54,9 +54,9 @@ variables:
     setup: detect
     description: >-
       Public IPv4 address of the server. Left empty in .env, the setup container detects it and
-      writes it. LiveKit announces it as node_ip (its public ICE candidate) and coturn as
-      external-ip.
-    consumers: [livekit, coturn, setup, preflight]
+      writes it. LiveKit announces it as node_ip (its public ICE candidate). coturn does not use
+      it: it relays on its bridge address (see coturn_config).
+    consumers: [livekit, setup, preflight]
     example: 203.0.113.10
     status: draft
     notes: >-
@@ -65,7 +65,6 @@ variables:
     sources:
       - pkg/routing/node.go:51-53 @ 8d11efdfcd — livekit fails without node_ip (ErrIPNotSet)
       - cmd/server/main.go:44-99 @ 8d11efdfcd — livekit env NODE_IP
-      - docs/docs/administration/turn-server.md:169-174 @ 35cad46a9f — coturn external-ip
       - bbb-install.sh:869-875 @ 2547823185 — upstream TURN_IP from the host address
 
   - name: BBB_PUBLIC_IPV6
@@ -438,6 +437,38 @@ variables:
     sources:
       - bbb-install.sh:1916-1917 @ 2547823185 — min-port/max-port 32769-65535 upstream
 
+  - name: BBB_NETWORK_SUBNET
+    tier: 2
+    required: false
+    secret: false
+    default: '172.30.82.0/24'
+    pattern: '((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])/(1[6-9]|2[0-8])'
+    setup: null
+    description: >-
+      Fixed IPv4 subnet of the internal `bbb` network. Fixed so that LiveKit has a stable address
+      coturn may relay to (BBB_LIVEKIT_IP). Change it if it collides with a network on the host.
+    consumers: [compose]
+    example: '172.30.82.0/24'
+    status: draft
+    sources:
+      - bbb-install.sh:1937-1941 @ 2547823185 — upstream restricts relay peers to one address
+
+  - name: BBB_LIVEKIT_IP
+    tier: 2
+    required: false
+    secret: false
+    default: '172.30.82.20'
+    pattern: '((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])'
+    setup: null
+    description: >-
+      Fixed address of LiveKit in BBB_NETWORK_SUBNET; the only peer coturn relays to. Must lie
+      inside BBB_NETWORK_SUBNET (checked by preflight).
+    consumers: [compose, coturn]
+    example: '172.30.82.20'
+    status: draft
+    sources:
+      - bbb-install.sh:1937-1941 @ 2547823185 — denied-peer-ip all, allowed-peer-ip one address
+
   - name: POSTGRES_BBB_CORE_PASSWORD
     tier: 2
     required: false
@@ -679,12 +710,15 @@ derived:
       - build/packages-template/bbb-graphql-server/after-install.sh:44-57 @ 35cad46a9f
 
   - name: coturn_config
-    formula: 'static-auth-secret=${TURN_SECRET}, realm=${BBB_DOMAIN}, external-ip=${BBB_PUBLIC_IPV4}, min-port=${TURN_RELAY_PORT_MIN}, max-port=${TURN_RELAY_PORT_MAX}, allowed-peer-ip=LiveKit bridge address (all other peers denied)'
-    inputs: [TURN_SECRET, BBB_DOMAIN, BBB_PUBLIC_IPV4, TURN_RELAY_PORT_MIN, TURN_RELAY_PORT_MAX]
+    formula: 'static-auth-secret=${TURN_SECRET}, realm=${BBB_DOMAIN}, min-port=${TURN_RELAY_PORT_MIN}, max-port=${TURN_RELAY_PORT_MAX}, denied-peer-ip=0.0.0.0-255.255.255.255, allowed-peer-ip=${BBB_LIVEKIT_IP}, no-tcp-relay; no external-ip and no relay-ip (coturn relays on its own bridge address)'
+    inputs: [TURN_SECRET, BBB_DOMAIN, TURN_RELAY_PORT_MIN, TURN_RELAY_PORT_MAX, BBB_LIVEKIT_IP]
     targets: ['coturn: /etc/turnserver.conf']
     description: >-
       coturn on the bridge network: only 3478/udp+tcp published, relay range internal, relaying
-      only to LiveKit's bridge address (upstream allows only the host address).
+      only to LiveKit's fixed bridge address (upstream allows only the host address). No
+      external-ip: relaying was verified on a test server with coturn on its own bridge address
+      and no external-ip; advertising the public IP would send LiveKit to unpublished relay ports.
+      no-tcp-relay keeps TURN users from opening TCP connections into the bbb network.
     status: draft
     sources:
       - bbb-install.sh:1904-1945 @ 2547823185 — turnserver.conf content
