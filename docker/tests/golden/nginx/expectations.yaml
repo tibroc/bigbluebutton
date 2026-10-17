@@ -1,0 +1,86 @@
+# Protected (supervisor, before T-043). Sources: images.md nginx row (`server_name _` /
+# default_server, no templating, feature fragments chosen by the entrypoint), compose.md (80/tcp
+# published for ACME + redirect; haproxy → nginx with PROXY protocol; routes; service names),
+# haproxy golden (`server … nginx:81 send-proxy`), bbb-install's sites-available/bigbluebutton
+# (parity reference), upstream fragments in /usr/share/bigbluebutton/nginx/, OQ-05, OQ-21, G2 B.
+# nginx consumes only BBB_FEATURES: the render must succeed without BBB_DOMAIN.
+render:
+  - file: etc/nginx/sites-available/bigbluebutton      # bare-metal site file (bbb-install)
+    format: lines
+    checks:
+      - {contains_line: '^\s*server_tokens\s+off;'}
+      - {contains_line: '^\s*server_name\s+_;'}
+      - {no_line: '^\s*server_name\s+[^_[:space:]]'}  # no host name: nginx never reads BBB_DOMAIN
+      - {contains_line: '^\s*listen\s+[^;]*default_server'}
+      # :80 is published directly (ACME + redirect), no PROXY protocol there
+      - {contains_line: '^\s*listen\s+(\*:|0\.0\.0\.0:)?80(\s[^;]*)?;'}
+      - {no_line: '^\s*listen\s+\S*80\s[^;]*proxy_protocol'}
+      - {contains_line: '^\s*location\s+(\^~\s+)?/\.well-known/acme-challenge/'}
+      - {contains_line: '(^|\s)return\s+30[18]\s+https://\$host\$request_uri;'}
+      - {no_line: '(^|\s)return\s+[0-9]+\s+https://\$server_name'}  # would redirect to https://_
+      # :81 receives haproxy's PROXY protocol from another container: not bound to loopback
+      - {contains_line: '^\s*listen\s+(\*:|0\.0\.0\.0:)?81\s[^;]*proxy_protocol'}
+      - {no_line: '^\s*listen\s+(127\.0\.0\.1|\[::1\]|localhost):'}
+      - {contains_line: '^\s*real_ip_header\s+proxy_protocol;'}
+      - {contains_line: '^\s*absolute_redirect\s+off;'}
+      - {no_line: '^\s*listen\s+[^;]*(443|\sssl)'}       # TLS ends at haproxy (ADR-07)
+      - {contains_line: '^\s*include\s+/etc/bigbluebutton/nginx/\*\.nginx;'}  # Tier 3 dir
+  - file: usr/share/bigbluebutton/nginx/livekit.nginx
+    format: lines
+    checks:
+      - {contains_line: '^\s*location\s+/livekit/\s*\{'}
+      - {contains_line: '^\s*proxy_pass\s+http://livekit:7880/;'}   # trailing slash strips /livekit
+      - {contains_line: '^\s*proxy_set_header\s+Upgrade\s+\$http_upgrade;'}
+  - file: usr/share/bigbluebutton/nginx/bbb-shared-notes-server.nginx
+    format: lines
+    checks:
+      - {contains_line: '^\s*proxy_pass\s+http://shared-notes:8787/collaboration;'}
+      - {contains_line: '^\s*proxy_pass\s+http://shared-notes:8787/api/;'}
+      - {contains_line: '^\s*auth_request\s+/bigbluebutton/connection/checkHocuspocusAuthorization;'}
+      - {contains_line: '^\s*proxy_pass\s+http://bbb-web:8090/bigbluebutton/connection/checkGraphqlAuthorization;'}
+      # OQ-21: the unauthenticated loopback API is never reachable from outside, and the
+      # trusted header is always overwritten from the auth result
+      - {contains_line: '^\s*location\s+(\^~\s+)?/hocuspocus/loopback/\s*\{'}
+      - {no_line: '^\s*proxy_pass\s+http://shared-notes:8787(/loopback|/?;)'}
+      - {contains_line: '^\s*proxy_set_header\s+User-Currently-Online\s+\$user_currently_online;'}
+      - {no_line: '^\s*proxy_pass\s+https?://(localhost|127\.0\.0\.1)[:/]'}
+  - file: usr/share/bigbluebutton/nginx/graphql.nginx
+    format: lines
+    checks:
+      - {contains_line: '^\s*location\s+/graphql\s*\{'}
+      - {contains_line: '^\s*proxy_pass\s+http://graphql-middleware:8378;'}
+      # Hasura REST directly to graphql-server: no local load balancer in containers; scaling is
+      # replicas behind one service name (adr-templating.md row 29)
+      - {contains_line: '^\s*proxy_pass\s+http://graphql-server:8085;'}
+      - {no_line: '^\s*proxy_pass\s+https?://(localhost|127\.0\.0\.1)[:/]'}
+  - file: usr/share/bigbluebutton/nginx/web              # bare-metal name; web.nginx is a symlink to it
+    format: lines
+    checks:
+      - {contains_line: '^\s*location\s+/bigbluebutton\s*\{'}
+      - {contains_line: '^\s*proxy_pass\s+http://bbb-web:8090;'}
+      - {no_line: '^\s*proxy_pass\s+https?://(localhost|127\.0\.0\.1)[:/]'}
+  - file: usr/share/bigbluebutton/nginx/webrtc-sfu.nginx
+    format: lines
+    checks:
+      - {contains_line: '^\s*proxy_pass\s+http://bbb-webrtc-sfu:3008;'}
+      - {contains_line: '^\s*auth_request\s+/bigbluebutton/connection/checkAuthorization;'}
+  - file: usr/share/bigbluebutton/nginx/bbb-html5.nginx.static   # html5 is served from this image
+    format: lines
+    checks:
+      - {contains_line: '^\s*location\s+/html5client\s*\{'}
+      - {contains_line: '^\s*alias\s+/usr/share/bigbluebutton/html5-client/;'}
+  # recording is in the fixture's BBB_FEATURES: playback and published-recording locations present
+  - file: usr/share/bigbluebutton/nginx/presentation.nginx
+    format: lines
+    checks:
+      - {contains_line: '^\s*location\s+/playback/presentation\s*\{'}
+      - {contains_line: '^\s*root\s+/var/bigbluebutton/published;'}   # bbb-data volume (ADR-09)
+  - file: usr/share/bigbluebutton/html5-client/private/config/settings.yml
+    format: yaml
+    checks:
+      - {path: .public.media.livekit.roomOptions.singlePeerConnection, equals: false}   # G2 B
+      - {path: .public.media.livekit.url, absent: true}   # client default wss://<host>/livekit
+must_fail:
+  - {set: {BBB_FEATURES: "recording,unknown"}, message: BBB_FEATURES}
+  - {set: {BBB_FEATURES: "recording\n# injected"}, message: BBB_FEATURES}
+uid: {user: "12345:12345"}
