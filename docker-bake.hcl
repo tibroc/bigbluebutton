@@ -1,93 +1,43 @@
+# Shared bake definitions. Each image's targets live in their own file, docker/bake/<image>.hcl,
+# so image changes do not touch this file. Pass this file first, then all per-image files:
+#
+#   docker buildx bake -f docker-bake.hcl $(printf -- '-f %s ' docker/bake/*.hcl) [TARGET...]
+#
+# Always pass the files explicitly: without -f, bake also loads docker-compose.yml from the
+# repo root and merges its services into the definition. See docker/README.md, "Building".
+
+# Overridden in CI by the bake file of docker/metadata-action (tags, labels).
 target "docker-metadata-action" {}
 
+# The shared entrypoint helper as the named context `entrypoint-lib` (P3). Image targets
+# inherit it; their Dockerfile then uses
+#   COPY --from=entrypoint-lib entrypoint-lib.sh /usr/local/lib/bbb/entrypoint-lib.sh
+target "_entrypoint-lib" {
+    contexts = {
+        entrypoint-lib = "./docker/lib"
+    }
+}
+
+# Java 21 runtime base for the JVM images, used as a named context:
+#   contexts = { java-base = "target:_java-base" }
 target "_java-base" {
+    inherits = ["_entrypoint-lib"]
     context = "./docker/java-base"
 }
 
-target "bbb-common-message" {
-    context = "./bbb-common-message"
-}
-
-target "apps-akka" {
-    inherits = ["docker-metadata-action"]
-    context = "./akka-bbb-apps"
-    contexts = {
-        java-base = "target:_java-base"
-        bbb-common-message = "target:bbb-common-message"
-        html5-config = "./bigbluebutton-html5/private/config"
-    }
-}
-
-target "bbb-common-web" {
-    context = "./bbb-common-web"
-    contexts = {
-        java-base = "target:_java-base"
-        bbb-common-message = "target:bbb-common-message"
-    }
-}
-
-target "web" {
-    inherits = ["docker-metadata-action"]
-    context = "./bigbluebutton-web"
-    contexts = {
-        java-base = "target:_java-base"
-        bbb-common-web = "target:bbb-common-web"
-        slides = "./bigbluebutton-config/slides"
-    }
-}
-
-target "html5-client" {
-    inherits = ["docker-metadata-action"]
-    context = "./bigbluebutton-html5"
-    contexts = {
-        client-build = "./build/packages-template/bbb-html5"
-    }
-}
-
-target "learning-dashboard" {
-      inherits = ["docker-metadata-action"]
-      context = "./bbb-learning-dashboard"
-}
-
-target "graphql-actions" {
-      inherits = ["docker-metadata-action"]
-      context = "./bbb-graphql-actions"
-}
-
-target "graphql-middleware" {
-      inherits = ["docker-metadata-action"]
-      context = "./bbb-graphql-middleware"
-}
-
-target "graphql-server" {
-      inherits = ["docker-metadata-action"]
-      context = "./bbb-graphql-server"
-}
-
-target "export-annotations" {
-      inherits = ["docker-metadata-action"]
-      context = "./bbb-export-annotations"
-}
-
-target "etherpad" {
-      inherits = ["docker-metadata-action"]
-      context = "./docker/etherpad"
-}
-
-target "record-and-playback" {
-    inherits = ["docker-metadata-action"]
-    context = "./record-and-playback"
-    contexts = {
-        bigbluebutton-config = "./bigbluebutton-config"
-    }
-}
-
-target "nginx" {
-      inherits = ["docker-metadata-action"]
-      dockerfile = "./docker/nginx/Dockerfile"
-      context = "."
-}
-
+# Bake does not merge groups across files (the last definition wins), so the group lists every
+# image target here, one per line.
 group "default" {
-  targets = ["apps-akka", "html5-client", "learning-dashboard", "graphql-actions", "graphql-middleware", "graphql-server", "export-annotations", "etherpad", "web", "record-and-playback", "nginx"]
+    targets = [
+        "apps-akka",
+        "html5-client",
+        "learning-dashboard",
+        "graphql-actions",
+        "graphql-middleware",
+        "graphql-server",
+        "export-annotations",
+        "web",
+        "record-and-playback",
+        "nginx",
+    ]
 }
