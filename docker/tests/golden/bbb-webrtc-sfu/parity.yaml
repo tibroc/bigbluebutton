@@ -1,0 +1,41 @@
+# Parity of the SFU base config with the bare-metal reference (RB-01).
+#
+# Bare metal: after-install.sh copies config/default.example.yml to config/default.yml and
+# edits it with yq-go; node-config then reads /etc/bigbluebutton/bbb-webrtc-sfu/production.yml
+# over it (bbb-webrtc-sfu.service NODE_CONFIG_DIR). The image makes the same edits at build
+# time with the same yq version, so formatting and the remaining values are identical.
+# The reference production.yml is the Tier 3 override that bbb-install writes (host IP for
+# mediasoup and FreeSWITCH, ESL password); the image does not render a Tier 3 file, so it is
+# not compared.
+reference: ../../parity/reference/bbb-webrtc-sfu
+files:
+  - rendered: usr/local/bigbluebutton/bbb-webrtc-sfu/config/default.yml
+    reference: usr/local/bigbluebutton/bbb-webrtc-sfu/config/default.yml
+allowed:
+  - file: usr/local/bigbluebutton/bbb-webrtc-sfu/config/default.yml
+    line: '^  - path: freeswitch/freeswitch\.js$'
+    reason: "ADR-15 / LX-4 (reports/T-012.md): FreeSWITCH adapter removed from media-server-adapters, no ESL connection attempts"
+  - file: usr/local/bigbluebutton/bbb-webrtc-sfu/config/default.yml
+    line: '^    name: Freeswitch$'
+    reason: "ADR-15 / LX-4 (reports/T-012.md): second line of the removed FreeSWITCH adapter entry"
+  - file: usr/local/bigbluebutton/bbb-webrtc-sfu/config/default.yml
+    line: '^  (sip_)?ip: (203\.0\.113\.10|127\.0\.0\.1)$'
+    reason: "ADR-15: no FreeSWITCH; after-install.sh sets freeswitch.ip/sip_ip to the host IP, unused without the FreeSWITCH adapter, so the shipped values stay"
+  - file: usr/local/bigbluebutton/bbb-webrtc-sfu/config/default.yml
+    line: '^ +announcedIp: "(203\.0\.113\.10|127\.0\.0\.1)"$'
+    reason: "ADR-15: media goes through LiveKit; after-install.sh sets the mediasoup announcedIp to the host IP, the SFU does not consume BBB_PUBLIC_IPV4 (config-contract.yaml), so the shipped value stays"
+  - file: usr/local/bigbluebutton/bbb-webrtc-sfu/config/default.yml
+    line: '^  key: fixturelivekitapikey$'
+    reason: "images.md Runtime (no secrets in files) / contract derived sfu_livekit: the key pair is node-config env LIVEKIT_KEY/LIVEKIT_SECRET, the shipped placeholders are removed"
+  - file: usr/local/bigbluebutton/bbb-webrtc-sfu/config/default.yml
+    line: '^  secret: fixturelivekitapisecretnotreal0+$'
+    reason: "images.md Runtime (no secrets in files) / contract derived sfu_livekit: the secret is node-config env LIVEKIT_SECRET; expectations: .livekit.secret absent"
+  - file: usr/local/bigbluebutton/bbb-webrtc-sfu/config/default.yml
+    line: '^  file: (true|false)$'
+    reason: "images.md Runtime: logs to stdout/stderr, no log files inside the container (log.file false, log.stdout stays true)"
+  - file: usr/local/bigbluebutton/bbb-webrtc-sfu/config/default.yml
+    line: '^  # livekit\.requestTimeout: seconds before a LiveKit server API call is aborted$'
+    reason: "upstream-layout.md P12: the image builds the version pinned in bbb-webrtc-sfu.placeholder.sh (v2.25.0-beta.3), whose default.example.yml:544-545 has this key; the RB-01 package does not"
+  - file: usr/local/bigbluebutton/bbb-webrtc-sfu/config/default.yml
+    line: '^  requestTimeout: 60$'
+    reason: "upstream-layout.md P12: pinned version's default.example.yml:545 (see the comment line above); absent in the RB-01 package"
