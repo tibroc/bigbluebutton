@@ -40,7 +40,8 @@
 #              the engine through its environment (`-e NAME`), never through argv or a file, and
 #              are never printed. The run must exit non-zero, its output must contain `message`
 #              and must not contain any `set` value verbatim. Its output is not shown.
-#   uid        one render with `--user UID:GID`: must exit 0 and produce the same tree.
+#   uid        one render with `--user UID:GID` (podman: also --passwd=false, as Docker and
+#              Kubernetes add no passwd entry): must exit 0 and produce the same tree.
 # All expectations files are validated before anything runs; an invalid one is a usage error.
 # yq (mikefarah v4, `yq` or `yq-go` in PATH) is needed for --parity and for expectations.
 #
@@ -791,7 +792,11 @@ expectations_check() {
     if [ "$(ey 'has("uid")')" = true ]; then
         user="$(ey .uid.user)"
         rc=0
-        render "$image" "$dir/fixture.env" "$w/uid" "$w/uid.log" --user "$user" || rc=$?
+        local -a uid_opts=(--user "$user")
+        # As docker/tests/uid/check.sh (T-030): podman adds a passwd entry for --user by
+        # default; Docker and Kubernetes do not.
+        if [ "$ENGINE" = podman ]; then uid_opts+=(--passwd=false); fi
+        render "$image" "$dir/fixture.env" "$w/uid" "$w/uid.log" "${uid_opts[@]}" || rc=$?
         if [ "$rc" -ne 0 ]; then
             expect_fail "uid: render as $user: exit $rc"
             tail -n 20 "$w/uid.log" | indent || true
