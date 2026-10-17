@@ -45,6 +45,7 @@ group "default" {
         "livekit",
         "haproxy",
         "shared-notes",
+        "bbb-webrtc-sfu",
         "certbot",
     ]
 }
