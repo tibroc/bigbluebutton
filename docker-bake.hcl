@@ -43,5 +43,7 @@ group "default" {
         "db-init",
         "coturn",
         "livekit",
+        "haproxy",
+        "certbot",
     ]
 }
