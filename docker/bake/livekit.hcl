@@ -1,5 +1,9 @@
+target "_livekit-tags" {
+    tags = bbb_image_tags("livekit")
+}
+
 target "livekit" {
-    inherits = ["docker-metadata-action", "_entrypoint-lib"]
+    inherits = ["_livekit-tags", "docker-metadata-action", "_entrypoint-lib"]
     context = "./docker/livekit"
     contexts = {
         bbb-livekit = "./build/packages-template/bbb-livekit"

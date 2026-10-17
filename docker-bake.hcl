@@ -6,6 +6,23 @@
 # Always pass the files explicitly: without -f, bake also loads docker-compose.yml from the
 # repo root and merges its services into the definition. See docker/README.md, "Building".
 
+# Image names as docker-compose.yml uses them: ${BBB_IMAGE_REGISTRY}/bbb-<image>:${BBB_IMAGE_TAG}
+# (docker/config-contract.yaml; list in docker/README.md, "Image names"). Local builds are
+# tagged localhost/bbb-<image>:4.0.1; run them with BBB_IMAGE_REGISTRY=localhost.
+variable "BBB_IMAGE_REGISTRY" {
+    default = "localhost"
+}
+variable "BBB_IMAGE_TAG" {
+    default = "4.0.1"
+}
+
+# Tags of one image. An image target inherits a target that sets them before
+# docker-metadata-action, so that CI's tags (set there) replace them.
+function "bbb_image_tags" {
+    params = [name]
+    result = ["${BBB_IMAGE_REGISTRY}/bbb-${name}:${BBB_IMAGE_TAG}"]
+}
+
 # Overridden in CI by the bake file of docker/metadata-action (tags, labels).
 target "docker-metadata-action" {}
 

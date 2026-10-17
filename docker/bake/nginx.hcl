@@ -1,5 +1,9 @@
+target "_nginx-tags" {
+    tags = bbb_image_tags("nginx")
+}
+
 target "nginx" {
-    inherits = ["docker-metadata-action", "_entrypoint-lib"]
+    inherits = ["_nginx-tags", "docker-metadata-action", "_entrypoint-lib"]
     context = "./docker/nginx"
     contexts = {
         html5-client = "target:html5-client"
