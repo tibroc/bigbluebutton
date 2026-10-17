@@ -294,7 +294,7 @@ variables:
     setup: null
     description: >-
       URL of the office document conversion service that bbb-web calls (ADR-13). Unset means
-      the stack's own conversion service.
+      office document conversion is disabled (PDF and images still work).
     consumers: [bbb-web]
     example: 'http://conversion:8080/convert'
     status: draft

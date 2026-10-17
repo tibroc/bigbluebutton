@@ -247,7 +247,7 @@ Optional. Unset variables take the default shown.
 |---|---|---|---|
 | [`BBB_UID`](#bbb_uid) | no | `998` | User id of every container that writes the shared data volume (/var/bigbluebutton) and the recorder volume. Set it to the bigbluebutton user id of an existing bare-metal tree or NFS export to keep its ownership. |
 | [`BBB_GID`](#bbb_gid) | no | `998` | Group id belonging to BBB_UID. |
-| [`BBB_WEB_CONVERSION_URL`](#bbb_web_conversion_url) | no | — | URL of the office document conversion service that bbb-web calls (ADR-13). Unset means the stack's own conversion service. |
+| [`BBB_WEB_CONVERSION_URL`](#bbb_web_conversion_url) | no | — | URL of the office document conversion service that bbb-web calls (ADR-13). Unset means office document conversion is disabled (PDF and images still work). |
 | [`BBB_WEB_PAGE_TOKEN_SECRET`](#bbb_web_page_token_secret) | no | — | HMAC key for presentation page tokens (pageTokenSecret). Unset means BBB_SHARED_SECRET, as upstream. |
 | [`BBB_WEB_MAX_HEAP_SIZE`](#bbb_web_max_heap_size) | no | `384m` | Java heap size of bbb-web (initial and maximum), JVM size syntax. |
 | [`RECORDING_RAW_RETENTION_DAYS`](#recording_raw_retention_days) | no | `14` | Deletes the raw recording data of recordings published more than N days ago (upstream published_days); 0 disables it. Published recordings are kept. |
@@ -294,7 +294,7 @@ Group id belonging to BBB_UID.
 
 ### BBB_WEB_CONVERSION_URL
 
-URL of the office document conversion service that bbb-web calls (ADR-13). Unset means the stack's own conversion service.
+URL of the office document conversion service that bbb-web calls (ADR-13). Unset means office document conversion is disabled (PDF and images still work).
 
 - **Required:** no. **Secret:** no.
 - **Default:** none
