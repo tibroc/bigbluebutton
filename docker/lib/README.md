@@ -133,6 +133,10 @@ output below `/out` at its bare-metal path (`/out/etc/bigbluebutton/...`), and e
 timestamps, neither envsubst nor yq does, and templates may not use the bash variables that
 change per run.
 
+`--render-only DIR` given as container arguments replaces the image's `CMD`, so `bbb_exec`
+receives no command. Every entrypoint therefore sets its default command right
+after `set -- "${BBB_ARGS[@]}"`, for example `[ "$#" -gt 0 ] || set -- livekit-server --config /run/livekit-server/livekit.yaml`.
+
 Entrypoints must not have side effects outside `bbb_path` before `bbb_exec` (no `chown` of
 volumes, no network calls), or must skip them when `bbb_is_render_only` is true.
 
