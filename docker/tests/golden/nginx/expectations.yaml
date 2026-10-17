@@ -22,6 +22,8 @@ render:
       - {contains_line: '^\s*listen\s+(\*:|0\.0\.0\.0:)?81\s[^;]*proxy_protocol'}
       - {no_line: '^\s*listen\s+(127\.0\.0\.1|\[::1\]|localhost):'}
       - {contains_line: '^\s*real_ip_header\s+proxy_protocol;'}
+      - {contains_line: '^\s*set_real_ip_from\s+172\.30\.82\.0/24;'}   # BBB_NETWORK_SUBNET default (bare metal: 127.0.0.1)
+      - {no_line: '^\s*set_real_ip_from\s+(0\.0\.0\.0/0|::/0)'}
       - {contains_line: '^\s*absolute_redirect\s+off;'}
       - {no_line: '^\s*listen\s+[^;]*(443|\sssl)'}       # TLS ends at haproxy (ADR-07)
       - {contains_line: '^\s*include\s+/etc/bigbluebutton/nginx/\*\.nginx;'}  # Tier 3 dir
@@ -81,6 +83,7 @@ render:
       - {path: .public.media.livekit.roomOptions.singlePeerConnection, equals: false}   # G2 B
       - {path: .public.media.livekit.url, absent: true}   # client default wss://<host>/livekit
 must_fail:
+  - {set: {BBB_NETWORK_SUBNET: "172.30.82.0/24\n# injected"}, message: BBB_NETWORK_SUBNET}
   - {set: {BBB_FEATURES: "recording,unknown"}, message: BBB_FEATURES}
   - {set: {BBB_FEATURES: "recording\n# injected"}, message: BBB_FEATURES}
 uid: {user: "12345:12345"}
