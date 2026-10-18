@@ -82,6 +82,24 @@ render:
     checks:
       - {path: .public.media.livekit.roomOptions.singlePeerConnection, equals: false}   # G2 B
       - {path: .public.media.livekit.url, absent: true}   # client default wss://<host>/livekit
+  # learning dashboard (T-050): app from the nginx image, per-meeting JSON from the bbb-data
+  # volume (LearningDashboardService.java:34,40,96, learning-dashboard.nginx:1-4 @ 35cad46a9f;
+  # docs/expectations/learning-dashboard.md)
+  - file: usr/share/bigbluebutton/nginx/learning-dashboard.nginx   # bare-metal name (always on)
+    format: lines
+    checks:
+      - {contains_line: '^\s*location\s+(\^~\s+)?/learning-analytics-dashboard/\s*\{'}
+      # a regex location for exactly the JSON file, served from the bbb-data volume
+      - {contains_line: '^\s*location\s+~\*?\s+\S*learning_dashboard_data\\?\.json'}
+      - {contains_line: '^\s*(alias\s+/var/bigbluebutton/learning-dashboard/\S+|root\s+/var/bigbluebutton/learning-dashboard/?);'}
+      # not upstream's whole-prefix alias: the volume holds no app files (ADR-09)
+      - {no_line: '^\s*alias\s+/var/bigbluebutton/learning-dashboard/?;'}
+      - {no_line: '^\s*autoindex\s+on;'}
+  # the client links to the location above (settings.yml:51 @ 35cad46a9f)
+  - file: usr/share/bigbluebutton/html5-client/private/config/settings.yml
+    format: yaml
+    checks:
+      - {path: .public.app.learningDashboardBase, equals: /learning-analytics-dashboard}
 must_fail:
   - {set: {BBB_NETWORK_SUBNET: "172.30.82.0/24\n# injected"}, message: BBB_NETWORK_SUBNET}
   - {set: {BBB_FEATURES: "recording,unknown"}, message: BBB_FEATURES}
