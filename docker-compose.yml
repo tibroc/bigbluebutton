@@ -13,6 +13,10 @@ name: bigbluebutton
 services:
   # TLS edge on 443 (ADR-07): terminates TLS and routes by ALPN / first byte to nginx (PROXY
   # protocol) or coturn. Resolves its backends at run time, so it needs no start order.
+  # Inside the stack, BBB_DOMAIN resolves to haproxy (network alias), as the server's own name
+  # resolves to the server on bare metal: bbb-web fetches https://BBB_DOMAIN/default.pdf at every
+  # create, without depending on public DNS or on the router sending the host's traffic to its
+  # own public address back in (hairpin NAT).
   haproxy:
     image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-haproxy:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
@@ -30,7 +34,9 @@ services:
     volumes:
       - certs:/etc/haproxy/certs:ro
     networks:
-      - bbb
+      bbb:
+        aliases:
+          - ${BBB_DOMAIN}
     healthcheck:
       test: ["CMD", "/bin/sh", "-c", "echo 'show info' | socat -t 2 stdio UNIX-CONNECT:/run/haproxy/admin.sock | grep -q '^Name: HAProxy'"]
       interval: 30s

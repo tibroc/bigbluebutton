@@ -123,6 +123,11 @@ if [ -n "${BBB_WEB_PAGE_TOKEN_SECRET:-}" ]; then
 fi
 set_property disableRecordingDefault "$disable_recording"
 set_property redisHost redis
+# Inside the stack, BBB_DOMAIN resolves to the TLS edge's internal address (docker-compose.yml,
+# haproxy alias), which the URL fetch checks reject as private unless the host is listed here;
+# on bare metal the name resolves to the server's public address. Listing the server's own
+# name keeps presentation, plugin and callback URLs on this server working as on bare metal.
+set_property fetchUrlAllowedLocalHosts "${BBB_DOMAIN}"
 # Office documents: without a conversion service, upstream's convert.sh path stays and is
 # absent from the image, which is how bare metal runs after bbb-libreoffice's uninstall
 # scripts: office uploads fail, PDF and image uploads convert as usual.

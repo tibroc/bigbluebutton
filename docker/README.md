@@ -153,6 +153,15 @@ with a message naming a missing or malformed variable.
   `docker compose restart` and after an upstream restarted by itself: Docker Engine 29 gives
   restarted containers other addresses, and `docker compose restart` restarts all services at
   once, in no particular order. Restart nginx once the others are healthy.
+- **The server's own name.** Inside the stack, `BBB_DOMAIN` resolves to haproxy (a network
+  alias), as the server's name resolves to the server itself on bare metal. bbb-web loads the
+  default presentation from `https://BBB_DOMAIN/default.pdf` at every create, so this works
+  without public DNS and behind NAT without hairpin routing. bbb-web verifies the certificate:
+  meetings created while haproxy still serves its temporary self-signed certificate (before
+  certbot's first certificate) start without the default presentation. URLs on `BBB_DOMAIN`
+  are allowed for bbb-web's URL fetches (`fetchUrlAllowedLocalHosts`), as on bare metal, where
+  the name resolves to a public address; a Tier 3 `bbb-web.properties` that sets this key
+  replaces that list.
 - **Ports.** Only nginx 80/tcp, haproxy 443/tcp, livekit 7882/udp and coturn 3478/udp+tcp are
   published. haproxy and nginx run as non-root users and bind 443, 80 and 81 through the
   per-container sysctl `net.ipv4.ip_unprivileged_port_start=0`. Published ports bypass ufw and
