@@ -154,9 +154,12 @@ if [ "$#" -eq 0 ]; then
     MAX_HEAP_SIZE="$BBB_WEB_MAX_HEAP_SIZE"
     export MALLOC_ARENA_MAX=2
     cd /usr/share/bbb-web
+    # JNA loads its native library from the image (Dockerfile) instead of unpacking it into
+    # /tmp, which a container may mount noexec; jna.nounpack makes a missing library an error.
     set -- java -Dgrails.env="${ENV}" -Dserver.address="${LISTEN_ADDRESS}" -Dserver.port="${LISTEN_PORT}" \
         -Dspring.main.allow-circular-references=true -Xms"${INITIAL_HEAP_SIZE}" -Xmx"${MAX_HEAP_SIZE}" \
         -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath="${HEAP_DUMP_PATH}" \
+        -Djna.boot.library.path=/usr/local/lib/bbb/bbb-web/jna -Djna.nounpack=true \
         -cp . org.springframework.boot.loader.launch.WarLauncher
 
     # Wait for redis, as the unit starts bbb-web after redis-server (After=, bbb-web.service).
