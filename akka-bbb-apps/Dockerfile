@@ -43,6 +43,39 @@ RUN git apply --verbose /tmp/application.conf.patch \
     && chmod 0644 ./* \
     && chmod 0755 ../bin/bbb-apps-akka
 
+# The redis address as akka-apps reads it, for the entrypoint's redis wait: the same Typesafe
+# Config call and defaults as SystemConfiguration.scala (ConfigFactory.load(), redis.host
+# 127.0.0.1, redis.port 6379), so includes, substitutions and every HOCON form of a Tier 3 file
+# give the address akka-apps will connect to. Prints "HOST PORT".
+COPY <<'EOF' /tmp/redis-address/RedisAddress.java
+import com.typesafe.config.Config;
+import com.typesafe.config.ConfigFactory;
+
+public final class RedisAddress {
+    public static void main(String[] args) {
+        Config config = ConfigFactory.load();
+        String host;
+        try {
+            host = config.getString("redis.host");
+        } catch (RuntimeException e) {
+            host = "127.0.0.1";
+        }
+        int port;
+        try {
+            port = config.getInt("redis.port");
+        } catch (RuntimeException e) {
+            port = 6379;
+        }
+        System.out.println(host + " " + port);
+    }
+}
+EOF
+
+WORKDIR /tmp/redis-address
+RUN javac --release 21 -cp "$(find /bbb-apps-akka/target/universal/stage/lib -name 'com.typesafe.config-*.jar')" \
+        -d /redis-address RedisAddress.java \
+    && chmod -R a+rX,go-w /redis-address
+
 # 2. Runtime
 # DL3006: java-base is a named build context, not an image.
 # hadolint ignore=DL3006
@@ -50,6 +83,7 @@ FROM java-base
 
 # The package's directory (/usr/share/bbb-apps-akka: bin, lib, conf), root-owned and read-only.
 COPY --from=build /bbb-apps-akka/target/universal/stage /usr/share/bbb-apps-akka
+COPY --from=build /redis-address /usr/local/lib/bbb/akka-apps
 # akka-apps reads the HTML5 client settings and hands them to clients (ClientSettings.scala);
 # the override /etc/bigbluebutton/bbb-html5.yml is merged over them if mounted (Tier 3).
 # Its directory is created first, traversable by any UID (docker/README.md). The override ships
