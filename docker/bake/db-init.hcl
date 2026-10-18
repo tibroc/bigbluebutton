@@ -1,5 +1,9 @@
+target "_db-init-tags" {
+    tags = bbb_image_tags("db-init")
+}
+
 target "db-init" {
-    inherits = ["docker-metadata-action", "_entrypoint-lib"]
+    inherits = ["_db-init-tags", "docker-metadata-action", "_entrypoint-lib"]
     context = "./docker/db-init"
     contexts = {
         graphql-server = "./bbb-graphql-server"

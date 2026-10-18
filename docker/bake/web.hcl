@@ -1,5 +1,9 @@
+target "_web-tags" {
+    tags = bbb_image_tags("web")
+}
+
 target "web" {
-    inherits = ["docker-metadata-action"]
+    inherits = ["_web-tags", "docker-metadata-action"]
     context = "./bigbluebutton-web"
     contexts = {
         java-base = "target:_java-base"
