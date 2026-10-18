@@ -4,6 +4,7 @@ target "_web-tags" {
 
 target "web" {
     inherits = ["_web-tags", "docker-metadata-action"]
+    platforms = compact(split(",", BBB_PLATFORMS))
     context = "./bigbluebutton-web"
     contexts = {
         java-base = "target:_java-base"

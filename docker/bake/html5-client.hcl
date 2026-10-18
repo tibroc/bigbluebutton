@@ -5,6 +5,7 @@ target "_html5-client-tags" {
 
 target "html5-client" {
     inherits = ["_html5-client-tags", "docker-metadata-action"]
+    platforms = compact(split(",", BBB_PLATFORMS))
     context = "./bigbluebutton-html5"
     contexts = {
         bbb-config = "./bigbluebutton-config"

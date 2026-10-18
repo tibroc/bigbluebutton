@@ -4,5 +4,6 @@ target "_haproxy-tags" {
 
 target "haproxy" {
     inherits = ["_haproxy-tags", "docker-metadata-action", "_entrypoint-lib"]
+    platforms = compact(split(",", BBB_PLATFORMS))
     context = "./docker/haproxy"
 }

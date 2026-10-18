@@ -16,6 +16,15 @@ variable "BBB_IMAGE_TAG" {
     default = "4.0.1"
 }
 
+# Platforms of the images that build for every architecture (comma-separated). Each image
+# target sets `platforms`: amd64-only images list "linux/amd64" with the reason, all others
+# use this variable. Empty by default, so local builds are for the host's platform. CI sets
+# it to "linux/amd64,linux/arm64" and reads each image's platforms with `bake --print`
+# (.github/workflows/build-all-images.yml); docker/README.md, "CI".
+variable "BBB_PLATFORMS" {
+    default = ""
+}
+
 # Tags of one image. An image target inherits a target that sets them before
 # docker-metadata-action, so that CI's tags (set there) replace them.
 function "bbb_image_tags" {

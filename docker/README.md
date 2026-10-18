@@ -37,10 +37,9 @@ Do not rely on bake's default file lookup: it also loads `docker-compose.yml` fr
 repository root and merges its services into the definition
 ([file lookup](https://docs.docker.com/build/bake/reference/#file-format)).
 
-The CI workflow `.github/workflows/build-docker-image.yml` lists `docker/bake/*.hcl` itself, so
-adding an image means adding its bake file, one line in the `default` group in
-`docker-bake.hcl` (bake does not merge a group defined in several files: the last definition
-wins) and its job in `build-all-images.yml`.
+Adding an image means adding its bake file (with `platforms`, see [CI](#ci)) and one line in
+the `default` group in `docker-bake.hcl` (bake does not merge a group defined in several files:
+the last definition wins). CI picks it up from there.
 
 ### Image names
 
@@ -237,3 +236,50 @@ docker/tests/lint/run.sh bigbluebutton-web/Dockerfile     # selected files
 runs hadolint (pinned image) with `docker/.hadolint.yaml`. Named build contexts look like
 undefined stages or untagged images to hadolint: silence DL3022 (`COPY --from=<context>`) and
 DL3006 (`FROM <context>`) on those lines only, with `# hadolint ignore=...`, not globally.
+
+## CI
+
+Two GitHub Actions workflows build the images with BuildKit (`docker/bake-action`), as
+`docker buildx bake` does for users. Both take the image list from bake: every target of the
+`default` group in `docker-bake.hcl`, named after its tag (`bbb-<image>`). The BuildKit layer
+cache is kept per target and platform (`type=gha`) and shared by both workflows.
+
+**`build-all-images.yml`** builds every image for each of its platforms on a native runner
+(`ubuntu-24.04`, `ubuntu-24.04-arm`) through the reusable `build-docker-image.yml`, and merges
+the platform images into one multi-arch image. On pushes (branches and `v*.*.*` tags) and manual
+runs it pushes `ghcr.io/<repository owner>/bbb-<image>`, which is `ghcr.io/bigbluebutton/bbb-<image>`,
+the default of `docker-compose.yml`, for the upstream repository; a fork pushes to its own owner
+and runs the stack with `BBB_IMAGE_REGISTRY=ghcr.io/<owner>`. Tags: the branch name (also with
+a `dev-` prefix), `sha-<short sha>` and, for release tags, `<version>`, `<major>.<minor>` and
+`<major>`. Pull requests that change image files build everything without pushing.
+
+**Platforms** are set per image in `docker/bake/<image>.hcl`. An image that builds only for
+amd64 sets `platforms = ["linux/amd64"]` with the reason in a comment (today graphql-server,
+graphql-middleware, livekit, bbb-webrtc-sfu, shared-notes and record-and-playback); every other
+image sets `platforms = compact(split(",", BBB_PLATFORMS))`. The bake variable `BBB_PLATFORMS`
+is empty by default, so local builds are for the host's platform; CI sets it to
+`linux/amd64,linux/arm64` to read the list:
+
+```bash
+BBB_PLATFORMS=linux/amd64,linux/arm64 \
+    docker buildx bake -f docker-bake.hcl $(printf -- '-f %s ' docker/bake/*.hcl) --print default
+```
+
+A target in the `default` group without a `bbb-<image>` tag or without platforms fails the
+workflow.
+
+**`docker-checks.yml`** runs on pull requests that change files below `docker/`, `*/docker/`,
+Dockerfiles, `docker-bake.hcl`, `docker-compose.yml` or the contract outputs, in parallel jobs:
+
+| Job | Runs |
+|---|---|
+| Configuration contract | `docker/tests/contract/run.sh` with `docker/contract/validate.sh`, `docker/contract/generate.sh --check` and `docker/tests/contract/test-contract.sh` |
+| Golden runner tests | `docker/tests/golden/run.sh` |
+| Compose file | `docker/tests/compose/run.sh`, then `assert-compose.sh` on `docker-compose.yml` for every feature combination |
+| Lint | `docker/tests/lint/run.sh` on the Dockerfiles the pull request changes (all of them when `docker/.hadolint.yaml` changes or on manual runs); shellcheck at severity warning on the scripts below `docker/` and `*/docker/`, including those without a `.sh` suffix |
+| Image `bbb-<image>` (one per bake target, amd64) | build with BuildKit, tagged `localhost/bbb-<image>:golden` and loaded into Docker; `docker/tests/dirmodes/check.sh`; `docker/tests/golden/run-golden.sh --engine docker --parity` for the golden cases of that image; `docker/tests/uid/check.sh` with the fixture env of its golden case, a write probe for each tmpfs and each writable named volume of its service in `docker-compose.yml` (`--no-render` for images without a golden case) |
+
+`shellcheck.yml` (upstream) also checks every `*.sh` file of the repository at severity error.
+Images that are neither in `docker-compose.yml` nor in a golden case (the build stage
+`html5-client`, and export-annotations, learning-dashboard and record-and-playback until they
+join the stack) get the directory-mode check only.
