@@ -64,11 +64,26 @@ cd "$APP_HOME"
 # akka-apps connects to redis once, in its main thread (Boot.scala, RedisPublisher); if redis
 # is not there, that thread dies but the actor system keeps the JVM running, without the
 # HTTP API and without exiting, so no restart policy helps. `docker compose restart` restarts
-# all services at once (RB-04, 2026-10-18). Not in render-only mode, and not with the Tier 3
-# file, which may point akka-apps at another redis. If redis does not answer within the
-# limit, exit: the restart policy starts the container again.
-if ! bbb_is_render_only && [ "$config_file" = "$APP_CONF" ] \
-    && [ "$(basename -- "$1")" = bbb-apps-akka ]; then
+# all services at once (RB-04, 2026-10-18). Not in render-only mode, and not when the Tier 3
+# file sets the redis host or port: HOCON allows too many forms (substitutions, includes) to
+# read the address reliably here, so then akka-apps connects on its own. A Tier 3 file that
+# overrides only other keys keeps the wait. If redis does not answer within the limit, exit:
+# the restart policy starts the container again.
+#
+# Whether the Tier 3 file sets redis.host/redis.port, ignoring comment lines: a dotted path
+# (redis.host = ..., also inside a quoted key), or host/port inside a redis { ... } object.
+# It errs on the side of skipping the wait: a host or port key anywhere in a file that opens
+# a redis object counts.
+override_sets_redis() {
+    local body
+    body="$(grep -vE '^[[:space:]]*(#|//)' -- "$1" || true)"
+    grep -qE 'redis"?[[:space:]]*\.[[:space:]]*"?(host|port)([^A-Za-z0-9_-]|$)' <<<"$body" && return 0
+    grep -qE '(^|[^A-Za-z0-9_.-])"?redis"?[[:space:]]*[:=]?[[:space:]]*\{' <<<"$body" \
+        && grep -qE '(^|[{,[:space:]])"?(host|port)"?[[:space:]]*[:=]' <<<"$body"
+}
+
+if ! bbb_is_render_only && [ "$(basename -- "$1")" = bbb-apps-akka ] \
+    && { [ "$config_file" = "$APP_CONF" ] || ! override_sets_redis "$config_file"; }; then
     deadline=$((SECONDS + REDIS_WAIT_SECONDS))
     # shellcheck disable=SC2016  # expanded by the inner bash
     until timeout 2 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$REDIS_HOST" "$REDIS_PORT" 2>/dev/null; do

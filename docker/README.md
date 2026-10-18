@@ -65,9 +65,9 @@ the same way, with the bake variables `BBB_IMAGE_REGISTRY` (default `localhost`)
 | `postgres` | `bbb-postgres` | `postgres` |
 | `shared-notes` | `bbb-shared-notes` | `shared-notes` |
 | `web` | `bbb-web` | `bbb-web` |
-| `learning-dashboard` | `bbb-learning-dashboard` | not in the skeleton yet |
 | `record-and-playback` | `bbb-record-and-playback` | not in the skeleton yet |
 | `html5-client` | `bbb-html5-client` | none: build stage of `nginx` |
+| `learning-dashboard` | `bbb-learning-dashboard` | none: build stage of `nginx` |
 
 `bbb-common-message`, `bbb-common-web` and `_java-base` are build stages and get no tag.
 Third-party images (redis) are pinned by tag and digest in `docker-compose.yml`.
@@ -320,4 +320,5 @@ Dockerfiles, `docker-bake.hcl`, `docker-compose.yml` or the contract outputs, in
 
 `shellcheck.yml` (upstream) also checks every `*.sh` file of the repository at severity error.
 Images that are neither in `docker-compose.yml` nor in a golden case (the build stage
-`html5-client`, and learning-dashboard and record-and-playback until they join the stack) get the directory-mode check only.
+`html5-client` and `learning-dashboard`, and record-and-playback until it joins the stack) get
+the directory-mode check only.

@@ -18,6 +18,10 @@ fi
 if [ "$(readlink -- /etc/turnserver.conf || true)" != /run/turnserver/turnserver.conf ] \
     || awk '$5 == "/etc/turnserver.conf" || $5 == "/run/turnserver/turnserver.conf" { found = 1 } END { exit !found }' /proc/self/mountinfo; then
     bbb_log "WARNING: using the file mounted at /etc/turnserver.conf as is; BBB_DOMAIN, TURN_SECRET, TURN_RELAY_PORT_MIN/MAX and BBB_LIVEKIT_IP are not applied"
+    if bbb_is_render_only; then
+        bbb_log "render-only: nothing written below $BBB_RENDER_ROOT (the mounted file is used as is); process not started"
+        exit 0
+    fi
     bbb_exec "$@"
 fi
 

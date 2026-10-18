@@ -19,6 +19,29 @@ if [ "${ACME_EMAIL,,}" = info@example.com ]; then
     bbb_die "ACME_EMAIL is the example address from the documentation; set your own contact address"
 fi
 
+# Names reserved for documentation and testing never get a certificate: refuse them before the
+# loop contacts the ACME server, so test and example setups do not reach a public CA. Reserved:
+# example.com, example.net, example.org and their subdomains (RFC 2606), and names below the
+# example, test, invalid and localhost top-level domains (RFC 2606, RFC 6761). Not in render-only
+# mode, which contacts no server (the golden fixture uses bbb.example.com).
+is_reserved_name() {
+    local name="${1,,}"
+    name="${name%.}"
+    case "$name" in
+        example.com | *.example.com | example.net | *.example.net | example.org | *.example.org) return 0 ;;
+        example | *.example | test | *.test | invalid | *.invalid | localhost | *.localhost) return 0 ;;
+    esac
+    return 1
+}
+if ! bbb_is_render_only; then
+    if is_reserved_name "$BBB_DOMAIN"; then
+        bbb_die "BBB_DOMAIN is a reserved example or test name (RFC 2606, RFC 6761); no certificate is requested for it"
+    fi
+    if is_reserved_name "${ACME_EMAIL##*@}"; then
+        bbb_die "ACME_EMAIL is at a reserved example or test domain (RFC 2606, RFC 6761); set your own contact address"
+    fi
+fi
+
 # 3. render
 dest="$(bbb_path /etc/bbb-certbot/cli.ini)"
 bbb_render /usr/local/share/bbb/certbot/cli.ini "$dest"
