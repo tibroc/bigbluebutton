@@ -294,7 +294,10 @@ services:
       start_period: 10s
       retries: 3
 
-  # Ubuntu 24.04's version (redis-server 7.0.15), as on bare metal.
+  # Ubuntu 24.04's version (redis-server 7.0.15), as on bare metal. A fixed address, as bare
+  # metal's 127.0.0.1: akka-apps and bbb-web (lettuce) keep the address they resolved for redis
+  # for the TTL of Docker's DNS answers (600 s) and reconnect to it, while Docker gives a
+  # restarted or recreated container a new address unless it is fixed.
   redis:
     image: docker.io/library/redis:7.0.15-alpine@sha256:c9d92d840fd011c908f040592857c724ae6d877f2aba5c40ad963276507386b2
     restart: unless-stopped
@@ -303,8 +306,9 @@ services:
     tmpfs:
       - /tmp
     networks:
-      - bbb
-      - notes
+      bbb:
+        ipv4_address: ${BBB_REDIS_IP:-172.30.82.21}
+      notes: {}
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s

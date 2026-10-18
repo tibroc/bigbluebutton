@@ -153,6 +153,11 @@ with a message naming a missing or malformed variable.
   `docker compose restart` and after an upstream restarted by itself: Docker Engine 29 gives
   restarted containers other addresses, and `docker compose restart` restarts all services at
   once, in no particular order. Restart nginx once the others are healthy.
+- **redis has a fixed address** in the `bbb` network (`BBB_REDIS_IP`, default `172.30.82.21`; it
+  must lie inside `BBB_NETWORK_SUBNET`), as bare metal's redis is always at 127.0.0.1. akka-apps
+  and bbb-web keep the address they resolved for `redis` for the TTL of Docker's DNS answers
+  (600 s) and reconnect to it; Docker gives a restarted or recreated container a new address
+  unless it is fixed, and the two would not reach redis until that time had passed.
 - **The server's own name.** Inside the stack, `BBB_DOMAIN` resolves to haproxy (a network
   alias), as the server's name resolves to the server itself on bare metal. bbb-web loads the
   default presentation from `https://BBB_DOMAIN/default.pdf` at every create, so this works
