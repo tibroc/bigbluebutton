@@ -105,6 +105,31 @@ COPY --from=packages --chmod=0644 bbb-graphql-middleware/bbb-graphql-client-sett
 COPY --from=bigbluebutton-config assets /var/www/bigbluebutton-default/assets
 # hadolint ignore=DL3022
 COPY --from=html5-client /usr/share/bigbluebutton/html5-client /usr/share/bigbluebutton/html5-client
+# The client build replaces the HTML5_CLIENT_VERSION and ?v=VERSION placeholders after webpack
+# has written the precompressed .gz copies (build/packages-template/bbb-html5/build.sh), and
+# bbb-html5.nginx.static serves those copies (gzip_static on). Each .gz whose content no longer
+# matches its file is written again, so browsers get the build identifier as cache buster. The
+# build fails if a placeholder is left in a served file (the JS bundles keep their own built-in
+# defaults, which settings.yml overrides).
+WORKDIR /usr/share/bigbluebutton/html5-client
+SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
+RUN find . -type f -name '*.gz' | while IFS= read -r gz; do \
+        f="${gz%.gz}"; \
+        if [ -f "$f" ] && ! gzip -dc "$gz" | cmp -s - "$f"; then \
+            gzip -9 -n -c "$f" >"$gz" || exit 1; \
+        fi; \
+    done \
+    && left="$(find . -type f \( \
+                 \( -name '*.gz' -exec sh -c 'gzip -dc "$1" | grep -qF "?v=VERSION"' _ {} \; \) \
+                 -o \( ! -name '*.gz' -exec grep -qF '?v=VERSION' {} \; \) \) -print)" \
+    && if grep -q HTML5_CLIENT_VERSION private/config/settings.yml; then \
+         left="$left private/config/settings.yml"; fi \
+    && if gzip -dc private/config/settings.yml.gz | grep HTML5_CLIENT_VERSION >/dev/null; then \
+         left="$left private/config/settings.yml.gz"; fi \
+    && if [ -n "$left" ]; then \
+         echo "html5 client: version placeholder left in:$left" >&2; exit 1; \
+       fi
+WORKDIR /
 # hadolint ignore=DL3022
 COPY --from=learning-dashboard /usr/share/bigbluebutton/learning-dashboard /usr/share/bigbluebutton/learning-dashboard
 COPY --chmod=0644 nginx.conf /etc/nginx/nginx.conf
