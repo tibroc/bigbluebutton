@@ -21,11 +21,16 @@ RUN npm ci
 COPY webpack.config.js postcss.config.js tailwind.config.js ./
 COPY public public
 COPY src src
+COPY learning-dashboard.nginx /tmp/learning-dashboard.nginx
+# The output tree is assembled here so that every directory gets 0755: in the scratch stage below,
+# BuildKit would give a directory created by `COPY --chmod=0644` that mode (docker/README.md).
 RUN npm run build \
-    && chmod -R a+rX,go-w build
+    && chmod -R a+rX,go-w build \
+    && install -D -m 0644 /tmp/learning-dashboard.nginx \
+        /out/usr/share/bigbluebutton/nginx/learning-dashboard.nginx
 
 # The app is not at its bare-metal path (/var/bigbluebutton/learning-dashboard): there the
 # containers mount the bbb-data volume, which holds only the JSON files bbb-web writes.
 FROM scratch
 COPY --from=build /src/build /usr/share/bigbluebutton/learning-dashboard
-COPY --chmod=0644 learning-dashboard.nginx /usr/share/bigbluebutton/nginx/learning-dashboard.nginx
+COPY --from=build /out/ /
