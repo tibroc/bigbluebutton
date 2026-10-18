@@ -5,8 +5,8 @@
 #
 #   docker compose up -d
 #
-# Not in the skeleton yet: recording, export-annotations, learning dashboard data, office
-# conversion, webhooks, greenlight, monitoring, setup and preflight. See docker/README.md.
+# Not in the skeleton yet: recording, learning dashboard data, office conversion, webhooks,
+# greenlight, monitoring, setup and preflight. See docker/README.md.
 
 name: bigbluebutton
 
@@ -260,6 +260,32 @@ services:
       interval: 10s
       timeout: 3s
       start_period: 15s
+      retries: 3
+
+  # Whiteboard annotation export to PDF: pops jobs that akka-apps queues in redis, reads the
+  # presentation from bbb-data, writes the PDF there and uploads it to bbb-web. A writer of
+  # bbb-data, so it runs as BBB_UID/BBB_GID like bbb-web. It exits when redis goes away (as on
+  # bare metal, where systemd restarts it); the restart policy brings it back.
+  export-annotations:
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-export-annotations:${BBB_IMAGE_TAG:-4.0.1}
+    restart: unless-stopped
+    user: "${BBB_UID:-998}:${BBB_GID:-998}"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /usr/local/bigbluebutton/bbb-export-annotations/config
+    volumes:
+      - bbb-data:/var/bigbluebutton
+    networks:
+      - bbb
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/lib/bbb/export-annotations-healthcheck.sh"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
       retries: 3
 
   # Ubuntu 24.04's version (redis-server 7.0.15), as on bare metal.
