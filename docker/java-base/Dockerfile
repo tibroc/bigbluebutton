@@ -29,6 +29,8 @@ ENV JAVA_HOME=/usr/lib/jvm/java-21 \
 
 # Shared entrypoint helper (P3): every image gets it the same way, from the bake named
 # context `entrypoint-lib` (./docker/lib). Root-owned and world-readable, so any UID can
-# source it. DL3022: entrypoint-lib is a named build context, not a stage.
+# source it. Its directory is created first, traversable by any UID (docker/README.md).
+# DL3022: entrypoint-lib is a named build context, not a stage.
+RUN install -d -m 0755 /usr/local/lib/bbb
 # hadolint ignore=DL3022
 COPY --from=entrypoint-lib --chmod=0644 entrypoint-lib.sh /usr/local/lib/bbb/entrypoint-lib.sh

@@ -83,8 +83,10 @@ RUN if [ "$TARGETARCH" != "amd64" ]; then \
 # alpine:3.24.1
 FROM docker.io/library/alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 
-# bash for the entrypoint helper; the healthcheck uses busybox wget.
-RUN apk add --no-cache bash
+# bash for the entrypoint helper; the healthcheck uses busybox wget. The directories of the
+# files copied below, traversable by any UID (docker/README.md).
+RUN apk add --no-cache bash \
+    && install -d -m 0755 /usr/share/livekit-server /usr/local/share/bbb/livekit /usr/local/lib/bbb
 
 COPY --from=build /usr/local/bin/yq /usr/local/bin/yq
 COPY --from=build /build/livekit-server /usr/bin/livekit-server

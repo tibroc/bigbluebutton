@@ -88,7 +88,9 @@ RUN install -D -m 0644 /usr/share/bbb-shared-notes-server/default.yml \
     && rm /usr/share/bbb-shared-notes-server/default.yml \
     && install -d -m 1777 /usr/share/bbb-shared-notes-server/config
 COPY --chmod=0755 docker/run-in-systemd.sh /usr/share/bbb-shared-notes-server/run-in-systemd.sh
+# The helper's directory is created first, traversable by any UID (docker/README.md).
 # DL3022: entrypoint-lib is a named build context, not a stage.
+RUN install -d -m 0755 /usr/local/lib/bbb
 # hadolint ignore=DL3022
 COPY --from=entrypoint-lib --chmod=0644 entrypoint-lib.sh /usr/local/lib/bbb/entrypoint-lib.sh
 COPY --chmod=0755 docker/entrypoint.sh /entrypoint.sh
