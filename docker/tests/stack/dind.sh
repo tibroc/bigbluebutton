@@ -14,6 +14,7 @@
 #   up                 issue the test certificate (see below), docker compose up -d --wait,
 #                      certbot scaled to 0, then restart nginx
 #   test [ARG...]      docker/tests/stack/join-path.sh against the stack (ARGs passed on)
+#   webhooks ARG...    docker/tests/stack/webhooks-check.sh against the stack (ARGs passed on)
 #   compose ARG...     docker compose ARG... for the stack
 #   docker ARG...      docker ARG... in the Engine
 #   stop               remove the Engine container and its volume (the stack with it)
@@ -181,6 +182,12 @@ case "$cmd" in
             "$HERE/join-path.sh" --insecure --docker "podman exec -i $NAME docker" \
             --compose "podman exec -i $NAME docker compose $COMPOSE_ARGS" \
             --client-image "localhost/bbb-graphql-actions:$TAG" "$@"
+        ;;
+    webhooks)
+        require_running
+        BBB_SHARED_SECRET="$(sed -n 's/^BBB_SHARED_SECRET=//p' "$HERE/fixture.env")" \
+            "$HERE/webhooks-check.sh" "$@" --docker "podman exec -i $NAME docker" \
+            --image "localhost/bbb-webhooks:$TAG"
         ;;
     compose) require_running; compose "$@" ;;
     docker) require_running; in_engine docker "$@" ;;
