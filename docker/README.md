@@ -319,6 +319,6 @@ Dockerfiles, `docker-bake.hcl`, `docker-compose.yml` or the contract outputs, in
 | Image `bbb-<image>` (one per bake target, amd64) | build with BuildKit, tagged `localhost/bbb-<image>:golden` and loaded into Docker; `docker/tests/dirmodes/check.sh`; `docker/tests/golden/run-golden.sh --engine docker --parity` for the golden cases of that image; `docker/tests/uid/check.sh` with the fixture env of its golden case, a write probe for each tmpfs and each writable named volume of its service in `docker-compose.yml` (`--no-render` for images without a golden case) |
 
 `shellcheck.yml` (upstream) also checks every `*.sh` file of the repository at severity error.
-Images that are neither in `docker-compose.yml` nor in a golden case (the build stage
+Images that are neither in `docker-compose.yml` nor in a golden case (the build stages
 `html5-client` and `learning-dashboard`, and record-and-playback until it joins the stack) get
 the directory-mode check only.
