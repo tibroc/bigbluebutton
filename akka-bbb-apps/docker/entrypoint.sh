@@ -84,6 +84,8 @@ override_sets_redis() {
 
 if ! bbb_is_render_only && [ "$(basename -- "$1")" = bbb-apps-akka ] \
     && { [ "$config_file" = "$APP_CONF" ] || ! override_sets_redis "$config_file"; }; then
+    # bash as PID 1 ignores SIGTERM without a handler; stop waiting when the container stops.
+    trap 'exit 143' TERM
     deadline=$((SECONDS + REDIS_WAIT_SECONDS))
     # shellcheck disable=SC2016  # expanded by the inner bash
     until timeout 2 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$REDIS_HOST" "$REDIS_PORT" 2>/dev/null; do
@@ -92,6 +94,7 @@ if ! bbb_is_render_only && [ "$(basename -- "$1")" = bbb-apps-akka ] \
         [ -n "${waiting:-}" ] || { bbb_log "waiting for redis ($REDIS_HOST:$REDIS_PORT)"; waiting=1; }
         sleep 1
     done
+    trap - TERM
 fi
 
 # 5. exec
