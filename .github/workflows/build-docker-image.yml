@@ -42,14 +42,20 @@ jobs:
 
       # ghcr.io/<owner>/<image>: ghcr.io/bigbluebutton/bbb-web upstream, the default image path
       # of docker-compose.yml. Registry paths must be lower case.
+      # COMMIT_DATE (bake variable, docker/bake/html5-client.hcl): the html5 client's build
+      # identifier, the commit date as upstream's package build sets it (build/setup.sh). All
+      # platforms of one commit get the same value.
       - name: Prepare
         env:
           PLATFORM: ${{ matrix.platform }}
           OWNER: ${{ github.repository_owner }}
           IMAGE_NAME: ${{ inputs.image_name }}
         run: |
-          echo "PLATFORM_PAIR=${PLATFORM//\//-}" >> "$GITHUB_ENV"
-          echo "IMAGE=ghcr.io/${OWNER,,}/${IMAGE_NAME}" >> "$GITHUB_ENV"
+          {
+            echo "PLATFORM_PAIR=${PLATFORM//\//-}"
+            echo "IMAGE=ghcr.io/${OWNER,,}/${IMAGE_NAME}"
+            echo "COMMIT_DATE=$(git log -1 --format=%cd --date=format:%Y%m%dT%H%M%S)"
+          } >> "$GITHUB_ENV"
 
       - name: Log in to the Container registry
         if: env.PUSH == 'true'

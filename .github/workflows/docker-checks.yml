@@ -167,11 +167,15 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       # The bake variables tag the image localhost/bbb-<image>:golden; loaded into Docker.
+      # COMMIT_DATE empty: the html5 client's build identifier is then 0, the value the golden
+      # expected trees hold (settings.yml), as in local test builds. The client's npm build does
+      # not depend on it, so it still comes from build-all-images.yml's cache.
       - name: Build with BuildKit
         uses: docker/bake-action@v6
         env:
           BBB_IMAGE_REGISTRY: localhost
           BBB_IMAGE_TAG: golden
+          COMMIT_DATE: ""
         with:
           source: .
           files: ${{ steps.bake-files.outputs.files }}

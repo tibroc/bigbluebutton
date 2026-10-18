@@ -3,13 +3,14 @@
 #
 # Build with bake (docker/bake/apps-akka.hcl defines the named contexts):
 #   docker buildx bake -f docker-bake.hcl $(printf -- '-f %s ' docker/bake/*.hcl) apps-akka
-# or with podman (--format docker keeps the HEALTHCHECK), after building the two base targets:
+# or with podman (--format docker keeps the HEALTHCHECK), after building the two base targets
+# and the html5 client (bigbluebutton-html5/Dockerfile, tagged localhost/bbb-html5-client):
 #   podman build -t bbb-common-message bbb-common-message
 #   podman build --build-context entrypoint-lib=docker/lib -t bbb-java-base docker/java-base
 #   podman build --format docker \
 #       --build-context bbb-common-message=container-image://localhost/bbb-common-message \
 #       --build-context java-base=container-image://localhost/bbb-java-base \
-#       --build-context html5-config=bigbluebutton-html5/private/config \
+#       --build-context html5-client=container-image://localhost/bbb-html5-client \
 #       -t bbb-apps-akka akka-bbb-apps
 #
 # Configuration: see docker/entrypoint.sh.
@@ -43,6 +44,39 @@ RUN git apply --verbose /tmp/application.conf.patch \
     && chmod 0644 ./* \
     && chmod 0755 ../bin/bbb-apps-akka
 
+# The redis address as akka-apps reads it, for the entrypoint's redis wait: the same Typesafe
+# Config call and defaults as SystemConfiguration.scala (ConfigFactory.load(), redis.host
+# 127.0.0.1, redis.port 6379), so includes, substitutions and every HOCON form of a Tier 3 file
+# give the address akka-apps will connect to. Prints "HOST PORT".
+COPY <<'EOF' /tmp/redis-address/RedisAddress.java
+import com.typesafe.config.Config;
+import com.typesafe.config.ConfigFactory;
+
+public final class RedisAddress {
+    public static void main(String[] args) {
+        Config config = ConfigFactory.load();
+        String host;
+        try {
+            host = config.getString("redis.host");
+        } catch (RuntimeException e) {
+            host = "127.0.0.1";
+        }
+        int port;
+        try {
+            port = config.getInt("redis.port");
+        } catch (RuntimeException e) {
+            port = 6379;
+        }
+        System.out.println(host + " " + port);
+    }
+}
+EOF
+
+WORKDIR /tmp/redis-address
+RUN javac --release 21 -cp "$(find /bbb-apps-akka/target/universal/stage/lib -name 'com.typesafe.config-*.jar')" \
+        -d /redis-address RedisAddress.java \
+    && chmod -R a+rX,go-w /redis-address
+
 # 2. Runtime
 # DL3006: java-base is a named build context, not an image.
 # hadolint ignore=DL3006
@@ -50,17 +84,20 @@ FROM java-base
 
 # The package's directory (/usr/share/bbb-apps-akka: bin, lib, conf), root-owned and read-only.
 COPY --from=build /bbb-apps-akka/target/universal/stage /usr/share/bbb-apps-akka
-# akka-apps reads the HTML5 client settings and hands them to clients (ClientSettings.scala);
-# the override /etc/bigbluebutton/bbb-html5.yml is merged over them if mounted (Tier 3).
+COPY --from=build /redis-address /usr/local/lib/bbb/akka-apps
+# akka-apps reads the HTML5 client settings and hands them to clients (ClientSettings.scala):
+# the html5 client build's settings.yml, as on bare metal (the bbb-html5 package's file), so it
+# has the same build identifier and release as the client nginx serves. The override /etc/bigbluebutton/bbb-html5.yml is merged over them if mounted (Tier 3).
 # Its directory is created first, traversable by any UID (docker/README.md). The override ships
 # empty ({}), as bare metal always has the file (without it akka-apps logs an error at every
 # start); an admin's file is bind-mounted over it.
 RUN install -d -m 0755 /usr/share/bigbluebutton/html5-client/private/config /etc/bigbluebutton \
     && printf '{}\n' > /etc/bigbluebutton/bbb-html5.yml \
     && chmod 0644 /etc/bigbluebutton/bbb-html5.yml
-# DL3022: html5-config is a named build context, not a stage.
+# DL3022: html5-client is a named build context, not a stage.
 # hadolint ignore=DL3022
-COPY --from=html5-config --chmod=0644 settings.yml /usr/share/bigbluebutton/html5-client/private/config/settings.yml
+COPY --from=html5-client --chmod=0644 /usr/share/bigbluebutton/html5-client/private/config/settings.yml \
+     /usr/share/bigbluebutton/html5-client/private/config/settings.yml
 COPY --chmod=0755 docker/entrypoint.sh /entrypoint.sh
 
 # As in the systemd unit (src/templates/systemloader/systemd/start-template).

@@ -184,6 +184,8 @@ if [ "$#" -eq 0 ]; then
             value="$(prop redisPort)"; redis_port="${value:-$redis_port}"
         fi
         redis_wait_seconds=60
+        # bash as PID 1 ignores SIGTERM without a handler; stop waiting when the container stops.
+        trap 'exit 143' TERM
         deadline=$((SECONDS + redis_wait_seconds))
         # shellcheck disable=SC2016  # expanded by the inner bash
         until timeout 2 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$redis_host" "$redis_port" 2>/dev/null; do
@@ -192,6 +194,7 @@ if [ "$#" -eq 0 ]; then
             [ -n "${waiting:-}" ] || { bbb_log "waiting for redis ($redis_host:$redis_port)"; waiting=1; }
             sleep 1
         done
+        trap - TERM
     fi
 fi
 

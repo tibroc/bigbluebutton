@@ -20,9 +20,6 @@ BBB_LOG_TAG=akka-apps
 APP_HOME=/usr/share/bbb-apps-akka
 APP_CONF="$APP_HOME/conf/application.conf"
 OVERRIDE=/etc/bigbluebutton/bbb-apps-akka.conf
-# redis as application.conf.patch configures it (redis.host, redis.port).
-REDIS_HOST=redis
-REDIS_PORT=6379
 REDIS_WAIT_SECONDS=60
 
 bbb_init "$@"
@@ -64,34 +61,34 @@ cd "$APP_HOME"
 # akka-apps connects to redis once, in its main thread (Boot.scala, RedisPublisher); if redis
 # is not there, that thread dies but the actor system keeps the JVM running, without the
 # HTTP API and without exiting, so no restart policy helps. `docker compose restart` restarts
-# all services at once (RB-04, 2026-10-18). Not in render-only mode, and not when the Tier 3
-# file sets the redis host or port: HOCON allows too many forms (substitutions, includes) to
-# read the address reliably here, so then akka-apps connects on its own. A Tier 3 file that
-# overrides only other keys keeps the wait. If redis does not answer within the limit, exit:
-# the restart policy starts the container again.
+# all services at once (RB-04, 2026-10-18). Not in render-only mode. If redis does not answer
+# within the limit, exit: the restart policy starts the container again.
 #
-# Whether the Tier 3 file sets redis.host/redis.port, ignoring comment lines: a dotted path
-# (redis.host = ..., also inside a quoted key), or host/port inside a redis { ... } object.
-# It errs on the side of skipping the wait: a host or port key anywhere in a file that opens
-# a redis object counts.
-override_sets_redis() {
-    local body
-    body="$(grep -vE '^[[:space:]]*(#|//)' -- "$1" || true)"
-    grep -qE 'redis"?[[:space:]]*\.[[:space:]]*"?(host|port)([^A-Za-z0-9_-]|$)' <<<"$body" && return 0
-    grep -qE '(^|[^A-Za-z0-9_.-])"?redis"?[[:space:]]*[:=]?[[:space:]]*\{' <<<"$body" \
-        && grep -qE '(^|[{,[:space:]])"?(host|port)"?[[:space:]]*[:=]' <<<"$body"
-}
-
-if ! bbb_is_render_only && [ "$(basename -- "$1")" = bbb-apps-akka ] \
-    && { [ "$config_file" = "$APP_CONF" ] || ! override_sets_redis "$config_file"; }; then
-    deadline=$((SECONDS + REDIS_WAIT_SECONDS))
-    # shellcheck disable=SC2016  # expanded by the inner bash
-    until timeout 2 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$REDIS_HOST" "$REDIS_PORT" 2>/dev/null; do
-        [ "$SECONDS" -lt "$deadline" ] \
-            || bbb_die "redis ($REDIS_HOST:$REDIS_PORT) not reachable after ${REDIS_WAIT_SECONDS}s"
-        [ -n "${waiting:-}" ] || { bbb_log "waiting for redis ($REDIS_HOST:$REDIS_PORT)"; waiting=1; }
-        sleep 1
-    done
+# The address is the one akka-apps will use: RedisAddress (Dockerfile) loads the same
+# configuration file with the same Typesafe Config call and the image's classpath, so a
+# Tier 3 file's includes, substitutions and object forms all count, and nothing is parsed
+# here. If the configuration cannot be loaded, akka-apps fails on it itself with the full
+# message; then there is no address to wait for.
+if ! bbb_is_render_only && [ "$(basename -- "$1")" = bbb-apps-akka ]; then
+    if address="$(java -Xshare:auto -XX:TieredStopAtLevel=1 -Xmx64m \
+            -cp "/usr/local/lib/bbb/akka-apps:$APP_HOME/lib/*" \
+            -Dconfig.file="$config_file" RedisAddress 2>/dev/null)" \
+        && read -r REDIS_HOST REDIS_PORT <<<"$address" && [ -n "$REDIS_HOST" ] \
+        && [[ "$REDIS_PORT" =~ ^[0-9]+$ ]]; then
+        # bash as PID 1 ignores SIGTERM without a handler; stop waiting when the container stops.
+        trap 'exit 143' TERM
+        deadline=$((SECONDS + REDIS_WAIT_SECONDS))
+        # shellcheck disable=SC2016  # expanded by the inner bash
+        until timeout 2 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$REDIS_HOST" "$REDIS_PORT" 2>/dev/null; do
+            [ "$SECONDS" -lt "$deadline" ] \
+                || bbb_die "redis ($REDIS_HOST:$REDIS_PORT) not reachable after ${REDIS_WAIT_SECONDS}s"
+            [ -n "${waiting:-}" ] || { bbb_log "waiting for redis ($REDIS_HOST:$REDIS_PORT)"; waiting=1; }
+            sleep 1
+        done
+        trap - TERM
+    else
+        bbb_log "WARNING: cannot read redis.host/redis.port from $config_file; not waiting for redis"
+    fi
 fi
 
 # 5. exec
