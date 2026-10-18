@@ -180,7 +180,9 @@ services:
       POSTGRES_BBB_HASURA_PASSWORD: ${POSTGRES_BBB_HASURA_PASSWORD:-}
     read_only: true
     tmpfs:
-      - /tmp
+      # exec: the hasura CLI (HOME=/tmp) unpacks its cli-ext helper below /tmp/.hasura and runs it
+      # during `metadata apply`; Docker mounts tmpfs noexec by default (RB-04, 2026-10-18).
+      - /tmp:exec
       - /run/bbb-graphql-server
     networks:
       - bbb
