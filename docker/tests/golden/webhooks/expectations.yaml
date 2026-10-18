@@ -1,0 +1,29 @@
+# Protected (supervisor, before T-0XX webhooks). Sources: contract derived webhooks_env
+# (SERVER_DOMAIN, SHARED_SECRET, BEARER_AUTH only if true; native env), internal SERVER_BIND_IP /
+# REDIS_HOST / NODE_ENV (env, not file content), WEBHOOKS_BEARER_AUTH notes (LX-2: any non-empty
+# BEARER_AUTH enables auth), adr-templating.md row 26 (secondary yq set of getRaw), images.md
+# Runtime (placeholders rejected) and Upstream proximity. Upstream: postinst TARGET
+# build/packages-template/bbb-webhooks/after-install.sh:6-19 @ 35cad46a9f; env mapping
+# config/custom-environment-variables.yml:1-4,45-49 @ 9787aea975.
+# The fixture sets WEBHOOKS_BEARER_AUTH=false: then BEARER_AUTH stays unset and the file value
+# decides, so the file must not carry the postinst's `auth2_0: true`.
+render:
+  - file: usr/local/bigbluebutton/bbb-webhooks/config/default.yml   # upstream postinst TARGET
+    format: yaml
+    checks:
+      - {path: .bbb.auth2_0, equals: false}      # else WEBHOOKS_BEARER_AUTH=false cannot disable auth
+      - {path: .bbb.sharedSecret, absent: true}  # env only; no shipped `mysharedsecret` left either
+      - {path: '.modules."../out/webhooks/index.js".config.getRaw', equals: false}   # postinst :18, ADR row 26
+  - file: usr/local/bigbluebutton/bbb-webhooks/config/default.yml
+    format: lines
+    checks:
+      - {no_line: 'fixturebbbsharedsecretnotreal'}   # secret never rendered anywhere in the file
+must_fail:
+  - {unset: BBB_DOMAIN, message: BBB_DOMAIN}
+  - {unset: BBB_SHARED_SECRET, message: BBB_SHARED_SECRET}
+  - {set: {BBB_DOMAIN: "not a domain"}, message: BBB_DOMAIN}
+  - {set: {BBB_DOMAIN: "bbb.example.com\n# injected"}, message: BBB_DOMAIN}
+  - {set: {BBB_SHARED_SECRET: "mysharedsecret"}, message: BBB_SHARED_SECRET}   # shipped placeholder (default.example.yml:19)
+  - {set: {BBB_SHARED_SECRET: "secret"}, message: BBB_SHARED_SECRET}
+  - {set: {WEBHOOKS_BEARER_AUTH: "yes"}, message: WEBHOOKS_BEARER_AUTH}         # pattern true|false
+uid: {user: "12345:12345"}
