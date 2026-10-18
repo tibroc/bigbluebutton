@@ -20,6 +20,10 @@ BBB_LOG_TAG=akka-apps
 APP_HOME=/usr/share/bbb-apps-akka
 APP_CONF="$APP_HOME/conf/application.conf"
 OVERRIDE=/etc/bigbluebutton/bbb-apps-akka.conf
+# redis as application.conf.patch configures it (redis.host, redis.port).
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_WAIT_SECONDS=60
 
 bbb_init "$@"
 set -- "${BBB_ARGS[@]}"
@@ -55,6 +59,25 @@ fi
 # A -Dconfig.file argument comes after the packaged one (conf/application.ini), so it wins.
 [ "$#" -gt 0 ] || set -- "$APP_HOME/bin/bbb-apps-akka" "-Dconfig.file=$config_file"
 cd "$APP_HOME"
+
+# Wait for redis, as the unit starts akka-apps after redis-server (After=, start-template).
+# akka-apps connects to redis once, in its main thread (Boot.scala, RedisPublisher); if redis
+# is not there, that thread dies but the actor system keeps the JVM running, without the
+# HTTP API and without exiting, so no restart policy helps. `docker compose restart` restarts
+# all services at once (RB-04, 2026-10-18). Not in render-only mode, and not with the Tier 3
+# file, which may point akka-apps at another redis. If redis does not answer within the
+# limit, exit: the restart policy starts the container again.
+if ! bbb_is_render_only && [ "$config_file" = "$APP_CONF" ] \
+    && [ "$(basename -- "$1")" = bbb-apps-akka ]; then
+    deadline=$((SECONDS + REDIS_WAIT_SECONDS))
+    # shellcheck disable=SC2016  # expanded by the inner bash
+    until timeout 2 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$REDIS_HOST" "$REDIS_PORT" 2>/dev/null; do
+        [ "$SECONDS" -lt "$deadline" ] \
+            || bbb_die "redis ($REDIS_HOST:$REDIS_PORT) not reachable after ${REDIS_WAIT_SECONDS}s"
+        [ -n "${waiting:-}" ] || { bbb_log "waiting for redis ($REDIS_HOST:$REDIS_PORT)"; waiting=1; }
+        sleep 1
+    done
+fi
 
 # 5. exec
 bbb_exec "$@"

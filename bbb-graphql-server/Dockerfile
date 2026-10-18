@@ -91,10 +91,13 @@ SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
 
 # The engine's shared libraries (libpq5, libodbc2, libgmp10; libkrb5-3 and libnuma1 as the
 # package depends on them, opts-noble.sh), curl for the healthcheck, envsubst for the helper.
+# netbase: /etc/protocols, which bare metal has but the base image lacks; without it
+# the engine's HTTP client fails before it connects ("Connection failure"), and every request
+# failed in the auth hook (akka-apps /userInfo; RB-04, 2026-10-18).
 # The directories of the files copied below, traversable by any UID (docker/README.md).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gettext-base \
-        libgmp10 libkrb5-3 libnuma1 libodbc2 libpq5 \
+        libgmp10 libkrb5-3 libnuma1 libodbc2 libpq5 netbase \
     && rm -rf /var/lib/apt/lists/* \
     && install -d -m 0755 /usr/share/bbb-graphql-server /usr/local/share/bbb/templates \
         /usr/local/lib/bbb

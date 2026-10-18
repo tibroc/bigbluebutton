@@ -158,6 +158,33 @@ if [ "$#" -eq 0 ]; then
         -Dspring.main.allow-circular-references=true -Xms"${INITIAL_HEAP_SIZE}" -Xmx"${MAX_HEAP_SIZE}" \
         -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath="${HEAP_DUMP_PATH}" \
         -cp . org.springframework.boot.loader.launch.WarLauncher
+
+    # Wait for redis, as the unit starts bbb-web after redis-server (After=, bbb-web.service).
+    # Without redis at start, the application context fails ("Application run failed") but
+    # the JVM keeps running, without the API and without exiting, so no restart policy helps.
+    # `docker compose restart` restarts all services at once (RB-04, 2026-10-18). redis as
+    # configured: redisHost/redisPort of the Tier 3 file if it sets them, else the image's.
+    # If redis does not answer within the limit, exit: the restart policy starts it again.
+    if ! bbb_is_render_only; then
+        tier3=/etc/bigbluebutton/bbb-web.properties
+        redis_host=redis
+        redis_port=6379
+        if [ -r "$tier3" ]; then
+            # the last `key=value` (or `key: value`) line of the Tier 3 file, trimmed
+            prop() { sed -n "s/^[[:space:]]*$1[[:space:]]*[=:][[:space:]]*\(.*[^[:space:]]\)[[:space:]]*\$/\1/p" "$tier3" | tail -n 1; }
+            value="$(prop redisHost)"; redis_host="${value:-$redis_host}"
+            value="$(prop redisPort)"; redis_port="${value:-$redis_port}"
+        fi
+        redis_wait_seconds=60
+        deadline=$((SECONDS + redis_wait_seconds))
+        # shellcheck disable=SC2016  # expanded by the inner bash
+        until timeout 2 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$redis_host" "$redis_port" 2>/dev/null; do
+            [ "$SECONDS" -lt "$deadline" ] \
+                || bbb_die "redis ($redis_host:$redis_port) not reachable after ${redis_wait_seconds}s"
+            [ -n "${waiting:-}" ] || { bbb_log "waiting for redis ($redis_host:$redis_port)"; waiting=1; }
+            sleep 1
+        done
+    fi
 fi
 
 # bbb-web needs BBB_SHARED_SECRET (and BBB_WEB_PAGE_TOKEN_SECRET) from the environment; the
