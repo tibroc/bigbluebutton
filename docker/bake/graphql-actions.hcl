@@ -4,5 +4,6 @@ target "_graphql-actions-tags" {
 
 target "graphql-actions" {
     inherits = ["_graphql-actions-tags", "docker-metadata-action"]
+    platforms = compact(split(",", BBB_PLATFORMS))
     context = "./bbb-graphql-actions"
 }

@@ -4,5 +4,6 @@ target "_export-annotations-tags" {
 
 target "export-annotations" {
       inherits = ["_export-annotations-tags", "docker-metadata-action"]
+      platforms = compact(split(",", BBB_PLATFORMS))
       context = "./bbb-export-annotations"
 }

@@ -7,6 +7,7 @@ target "_apps-akka-tags" {
 
 target "apps-akka" {
     inherits = ["_apps-akka-tags", "docker-metadata-action"]
+    platforms = compact(split(",", BBB_PLATFORMS))
     context = "./akka-bbb-apps"
     contexts = {
         java-base = "target:_java-base"
