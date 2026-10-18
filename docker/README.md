@@ -55,6 +55,7 @@ the same way, with the bake variables `BBB_IMAGE_REGISTRY` (default `localhost`)
 | `certbot` | `bbb-certbot` | `certbot` |
 | `coturn` | `bbb-coturn` | `coturn` |
 | `db-init` | `bbb-db-init` | `db-init` |
+| `export-annotations` | `bbb-export-annotations` | `export-annotations` |
 | `graphql-actions` | `bbb-graphql-actions` | `graphql-actions` |
 | `graphql-middleware` | `bbb-graphql-middleware` | `graphql-middleware` |
 | `graphql-server` | `bbb-graphql-server` | `graphql-server` |
@@ -64,7 +65,6 @@ the same way, with the bake variables `BBB_IMAGE_REGISTRY` (default `localhost`)
 | `postgres` | `bbb-postgres` | `postgres` |
 | `shared-notes` | `bbb-shared-notes` | `shared-notes` |
 | `web` | `bbb-web` | `bbb-web` |
-| `export-annotations` | `bbb-export-annotations` | not in the skeleton yet |
 | `learning-dashboard` | `bbb-learning-dashboard` | not in the skeleton yet |
 | `record-and-playback` | `bbb-record-and-playback` | not in the skeleton yet |
 | `html5-client` | `bbb-html5-client` | none: build stage of `nginx` |
@@ -139,10 +139,10 @@ each service receives only the variables it reads. The images validate them at s
 with a message naming a missing or malformed variable.
 
 - **Walking skeleton.** The file has the services of the skeleton: haproxy, certbot, nginx,
-  bbb-web, akka-apps, graphql-server, graphql-middleware, graphql-actions, shared-notes, redis,
-  postgres, db-init (a job that exits after setting up the databases), livekit, bbb-webrtc-sfu
-  and coturn. Recording, export-annotations, office conversion, webhooks, greenlight,
-  monitoring, setup and preflight follow; until then use `BBB_FEATURES=recording` or an empty
+  bbb-web, akka-apps, graphql-server, graphql-middleware, graphql-actions, shared-notes,
+  export-annotations, redis, postgres, db-init (a job that exits after setting up the
+  databases), livekit, bbb-webrtc-sfu and coturn. Recording, office conversion, webhooks,
+  greenlight, monitoring, setup and preflight follow; until then use `BBB_FEATURES=recording` or an empty
   `BBB_FEATURES` (with `webhooks`, nginx would proxy to a service that does not exist yet).
 - **Restart nginx after recreating or restarting an upstream.** nginx resolves the service
   names it proxies to once, at start, so it waits for all of them to be healthy. `docker
@@ -293,7 +293,8 @@ a `dev-` prefix), `sha-<short sha>` and, for release tags, `<version>`, `<major>
 
 **Platforms** are set per image in `docker/bake/<image>.hcl`. An image that builds only for
 amd64 sets `platforms = ["linux/amd64"]` with the reason in a comment (today graphql-server,
-graphql-middleware, livekit, bbb-webrtc-sfu, shared-notes and record-and-playback); every other
+graphql-middleware, livekit, bbb-webrtc-sfu, shared-notes, export-annotations and
+record-and-playback); every other
 image sets `platforms = compact(split(",", BBB_PLATFORMS))`. The bake variable `BBB_PLATFORMS`
 is empty by default, so local builds are for the host's platform; CI sets it to
 `linux/amd64,linux/arm64` to read the list:
@@ -319,5 +320,4 @@ Dockerfiles, `docker-bake.hcl`, `docker-compose.yml` or the contract outputs, in
 
 `shellcheck.yml` (upstream) also checks every `*.sh` file of the repository at severity error.
 Images that are neither in `docker-compose.yml` nor in a golden case (the build stage
-`html5-client`, and export-annotations, learning-dashboard and record-and-playback until they
-join the stack) get the directory-mode check only.
+`html5-client`, and learning-dashboard and record-and-playback until they join the stack) get the directory-mode check only.
