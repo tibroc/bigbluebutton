@@ -598,6 +598,19 @@ are not settings; changing them breaks the stack.
 | `recording: bn_notes_endpoint` | recording | `http://shared-notes:8787/loopback/api/documents` | Recording archives notes from the shared-notes loopback API over the notes network. |
 | `livekit: log_level` | livekit | `info` | Never debug by default: LiveKit sends the TURN password in every join response, and debug logs contain it. |
 | `livekit: webhook.urls` | livekit | `http://bbb-webrtc-sfu:3040/livekit-webhook` | livekit-server posts room events to the SFU (YAML only, no env). |
+| `PGHOST` | db-init | `postgres` | libpq host of the db-init job: the postgres service (ADR-14). |
+| `PGPORT` | db-init | `5432` | libpq port of the db-init job, postgres' default. |
+| `akka-apps: http.interface` | akka-apps | `0.0.0.0` | Listen address of akka-apps' HTTP API (port 8901): Hasura's auth hook and the middleware's session-vars hook call it from other containers. Upstream binds 127.0.0.1. |
+| `graphql-server: HASURA_GRAPHQL_AUTH_HOOK` | graphql-server | `http://akka-apps:8901/userInfo` | Upstream's auth hook with the akka-apps service name instead of 127.0.0.1. |
+| `graphql-server: HASURA_BBB_GRAPHQL_ACTIONS_ADAPTER_URL` | graphql-server | `http://graphql-actions:8093` | Upstream's actions URL with the graphql-actions service name. |
+| `graphql-middleware: config.yml wiring` | graphql-middleware | `server.listen_host=0.0.0.0, redis.host=redis, hasura.url=ws://graphql-server:8085/v1/graphql, graphql-actions.url=http://graphql-actions:8093, auth_hook.url=http://bbb-web:8090/..., session_vars_hook.url=http://akka-apps:8901/userInfo` | Upstream's config.yml with service names; Hasura directly, without the bare-metal nginx load balancer on 8185 (adr-templating row 29). |
+| `NODE_ENV` | graphql-actions | `production` | As in the systemd unit. |
+| `NODE_ENV` | shared-notes | `production` | As in the systemd unit. |
+| `NODE_ENV` | bbb-webrtc-sfu | `production` | As in the systemd unit. |
+| `NODE_CONFIG_DIR` | bbb-webrtc-sfu | `/etc/bigbluebutton/bbb-webrtc-sfu/:/usr/local/bigbluebutton/bbb-webrtc-sfu/config/` | As in the systemd unit; the first directory is the Tier 3 override location. |
+| `ALLOW_CONFIG_MUTATIONS` | bbb-webrtc-sfu | `true` | As in the systemd unit. |
+| `bbb-web: redisHost and server.address` | bbb-web | `redisHost=redis, -Dserver.address=0.0.0.0, MALLOC_ARENA_MAX=2` | redis service name in the classpath properties; listen on all interfaces so nginx reaches port 8090; MALLOC_ARENA_MAX as the bare-metal start script. |
+| `nginx: proxy targets` | nginx | `bbb-web:8090, shared-notes:8787, graphql-middleware:8378, graphql-server:8085, livekit:7880, bbb-webrtc-sfu:3008, webhooks:3005` | Upstream's location fragments with service names instead of 127.0.0.1/localhost; listen 80 and 81 (proxy_protocol) on all interfaces. |
 
 ## Tier 3: override files
 
@@ -610,7 +623,7 @@ same as on a bare-metal server, so the existing documentation applies.
 | bbb-web | `/etc/bigbluebutton/turn-stun-servers.xml` | xml | Replaces the image's file as a whole when readable (no merge). | supported |
 | bbb-web | `/etc/bigbluebutton/bbb-web.env` | env | systemd EnvironmentFile on bare metal. Not read in containers: use BBB_WEB_MAX_HEAP_SIZE or the service's environment in a compose override. | not-supported |
 | akka-apps | `/etc/bigbluebutton/bbb-apps-akka.conf` | hocon | Loaded with -Dconfig.file; must start with include of the image's application.conf, then later keys win (HOCON). | supported |
-| html5 | `/etc/bigbluebutton/bbb-html5.yml` | yaml | Deep merge into settings.yml at runtime by akka-apps (maps merged, arrays replaced). | supported |
+| akka-apps | `/etc/bigbluebutton/bbb-html5.yml` | yaml | Deep merge into the html5 settings.yml at runtime by akka-apps (maps merged, arrays replaced). | supported |
 | graphql-middleware | `/etc/bigbluebutton/bbb-graphql-middleware.yml` | yaml | Merged by the binary over its config.yml (mergo WithOverride). | supported |
 | graphql-server | `/etc/bigbluebutton/bbb-graphql-server.env` | env | systemd EnvironmentFile on bare metal. Not read in containers: Hasura reads env, set it in a compose override. HASURA_GRAPHQL_ADMIN_SECRET comes from HASURA_ADMIN_SECRET. | not-supported |
 | shared-notes | `/etc/bigbluebutton/bbb-shared-notes-server.yml` | yaml | Deep merge by the service over default.yml (objects merged, arrays and scalars replaced). The image renders its wiring into default.yml, never into this path. | supported |

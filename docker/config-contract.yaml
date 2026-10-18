@@ -937,6 +937,124 @@ internal:
     sources:
       - build/packages-template/bbb-livekit/livekit.yaml:14-16 @ 35cad46a9f
 
+  - name: PGHOST
+    consumer: db-init
+    value: 'postgres'
+    description: >-
+      libpq host of the db-init job: the postgres service (ADR-14).
+    status: draft
+    sources:
+      - docker/db-init/Dockerfile:38-39 @ 5933f0dda4
+
+  - name: PGPORT
+    consumer: db-init
+    value: '5432'
+    description: >-
+      libpq port of the db-init job, postgres' default.
+    status: draft
+    sources:
+      - docker/db-init/Dockerfile:38-39 @ 5933f0dda4
+
+  - name: 'akka-apps: http.interface'
+    consumer: akka-apps
+    value: '0.0.0.0'
+    description: >-
+      Listen address of akka-apps' HTTP API (port 8901): Hasura's auth hook and the middleware's session-vars hook call it from other containers. Upstream binds 127.0.0.1.
+    status: draft
+    sources:
+      - akka-bbb-apps/docker/application.conf.patch:44-46 @ 5933f0dda4
+      - akka-bbb-apps/src/universal/conf/application.conf:83-84 @ 35cad46a9f
+
+  - name: 'graphql-server: HASURA_GRAPHQL_AUTH_HOOK'
+    consumer: graphql-server
+    value: 'http://akka-apps:8901/userInfo'
+    description: >-
+      Upstream's auth hook with the akka-apps service name instead of 127.0.0.1.
+    status: draft
+    sources:
+      - bbb-graphql-server/Dockerfile:80 @ 5933f0dda4
+
+  - name: 'graphql-server: HASURA_BBB_GRAPHQL_ACTIONS_ADAPTER_URL'
+    consumer: graphql-server
+    value: 'http://graphql-actions:8093'
+    description: >-
+      Upstream's actions URL with the graphql-actions service name.
+    status: draft
+    sources:
+      - bbb-graphql-server/Dockerfile:81 @ 5933f0dda4
+
+  - name: 'graphql-middleware: config.yml wiring'
+    consumer: graphql-middleware
+    value: 'server.listen_host=0.0.0.0, redis.host=redis, hasura.url=ws://graphql-server:8085/v1/graphql, graphql-actions.url=http://graphql-actions:8093, auth_hook.url=http://bbb-web:8090/..., session_vars_hook.url=http://akka-apps:8901/userInfo'
+    description: >-
+      Upstream's config.yml with service names; Hasura directly, without the bare-metal nginx load balancer on 8185 (adr-templating row 29).
+    status: draft
+    sources:
+      - bbb-graphql-middleware/Dockerfile:62-70 @ 5933f0dda4
+
+  - name: NODE_ENV
+    consumer: graphql-actions
+    value: 'production'
+    description: >-
+      As in the systemd unit.
+    status: draft
+    sources:
+      - bbb-graphql-actions/Dockerfile:41-44 @ 5933f0dda4
+
+  - name: NODE_ENV
+    consumer: shared-notes
+    value: 'production'
+    description: >-
+      As in the systemd unit.
+    status: draft
+    sources:
+      - bbb-shared-notes-server/Dockerfile:96-97 @ 5933f0dda4
+
+  - name: NODE_ENV
+    consumer: bbb-webrtc-sfu
+    value: 'production'
+    description: >-
+      As in the systemd unit.
+    status: draft
+    sources:
+      - docker/bbb-webrtc-sfu/Dockerfile:84 @ 5933f0dda4
+
+  - name: NODE_CONFIG_DIR
+    consumer: bbb-webrtc-sfu
+    value: '/etc/bigbluebutton/bbb-webrtc-sfu/:/usr/local/bigbluebutton/bbb-webrtc-sfu/config/'
+    description: >-
+      As in the systemd unit; the first directory is the Tier 3 override location.
+    status: draft
+    sources:
+      - docker/bbb-webrtc-sfu/Dockerfile:85 @ 5933f0dda4
+
+  - name: ALLOW_CONFIG_MUTATIONS
+    consumer: bbb-webrtc-sfu
+    value: 'true'
+    description: >-
+      As in the systemd unit.
+    status: draft
+    sources:
+      - docker/bbb-webrtc-sfu/Dockerfile:86 @ 5933f0dda4
+
+  - name: 'bbb-web: redisHost and server.address'
+    consumer: bbb-web
+    value: 'redisHost=redis, -Dserver.address=0.0.0.0, MALLOC_ARENA_MAX=2'
+    description: >-
+      redis service name in the classpath properties; listen on all interfaces so nginx reaches port 8090; MALLOC_ARENA_MAX as the bare-metal start script.
+    status: draft
+    sources:
+      - bigbluebutton-web/docker/entrypoint.sh:125,152,155 @ 5933f0dda4
+
+  - name: 'nginx: proxy targets'
+    consumer: nginx
+    value: 'bbb-web:8090, shared-notes:8787, graphql-middleware:8378, graphql-server:8085, livekit:7880, bbb-webrtc-sfu:3008, webhooks:3005'
+    description: >-
+      Upstream's location fragments with service names instead of 127.0.0.1/localhost; listen 80 and 81 (proxy_protocol) on all interfaces.
+    status: draft
+    sources:
+      - docker/nginx/Dockerfile:56-68 @ 5933f0dda4
+
 # --------------------------------------------------------------------------------------------
 # overrides: Tier 3 files, mounted at the bare-metal path so existing docs apply.
 # --------------------------------------------------------------------------------------------
@@ -986,10 +1104,10 @@ overrides:
       - akka-bbb-apps/src/universal/conf/application.conf:69-70 @ 35cad46a9f
       - bigbluebutton-config/bin/bbb-conf:1516-1522 @ 35cad46a9f
 
-  - component: html5
+  - component: akka-apps
     path: /etc/bigbluebutton/bbb-html5.yml
     format: yaml
-    merge: Deep merge into settings.yml at runtime by akka-apps (maps merged, arrays replaced).
+    merge: Deep merge into the html5 settings.yml at runtime by akka-apps (maps merged, arrays replaced).
     support: supported
     status: draft
     sources:
