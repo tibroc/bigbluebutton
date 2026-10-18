@@ -77,6 +77,7 @@ the same way, with the bake variables `BBB_IMAGE_REGISTRY` (default `localhost`)
 | `postgres` | `bbb-postgres` | `postgres` |
 | `shared-notes` | `bbb-shared-notes` | `shared-notes` |
 | `web` | `bbb-web` | `bbb-web` |
+| `webhooks` | `bbb-webhooks` | `webhooks` (profile `webhooks`) |
 | `record-and-playback` | `bbb-record-and-playback` | not in the skeleton yet |
 | `html5-client` | `bbb-html5-client` | none: build stage of `nginx`, `apps-akka` and `web` (its `settings.yml`) |
 | `learning-dashboard` | `bbb-learning-dashboard` | none: build stage of `nginx` |
@@ -153,14 +154,23 @@ with a message naming a missing or malformed variable.
 - **Walking skeleton.** The file has the services of the skeleton: haproxy, certbot, nginx,
   bbb-web, akka-apps, graphql-server, graphql-middleware, graphql-actions, shared-notes,
   export-annotations, redis, postgres, db-init (a job that exits after setting up the
-  databases), livekit, bbb-webrtc-sfu and coturn. Recording, office conversion, webhooks,
-  greenlight, monitoring, setup and preflight follow; until then use `BBB_FEATURES=recording` or an empty
-  `BBB_FEATURES` (with `webhooks`, nginx would proxy to a service that does not exist yet).
+  databases), livekit, bbb-webrtc-sfu and coturn, and the optional webhooks (profile
+  `webhooks`, below). Recording, office conversion, greenlight, monitoring, setup and preflight
+  follow; until then use `BBB_FEATURES=recording`, `BBB_FEATURES=webhooks`, both, or an empty
+  `BBB_FEATURES`.
+- **Webhooks** (bbb-webhooks, optional as on bare metal) run when `BBB_FEATURES` contains
+  `webhooks`: `.env` derives `COMPOSE_PROFILES` from it, which starts the service, and nginx
+  then proxies `/bigbluebutton/api/hooks` to it. `WEBHOOKS_BEARER_AUTH` (default `true`) selects
+  how callbacks are authenticated: the shared secret as a Bearer token, or (`false`) a checksum
+  in the callback URL. A Tier 3 `/etc/bigbluebutton/bbb-webhooks/production.yml` is merged over
+  the image's configuration; the shared secret, the domain, redis and the listen address come
+  from the environment and cannot be changed there, nor can Bearer auth be turned off there
+  while `WEBHOOKS_BEARER_AUTH=true`.
 - **Restart nginx after recreating or restarting an upstream.** nginx resolves the service
   names it proxies to once, at start, so it waits for all of them to be healthy. `docker
   compose up -d` recreates only the services whose configuration or image changed; if that
   included one of nginx's upstreams (bbb-web, shared-notes, graphql-server, graphql-middleware,
-  livekit, bbb-webrtc-sfu), run `docker compose restart nginx` afterwards, or nginx answers 502
+  livekit, bbb-webrtc-sfu, webhooks), run `docker compose restart nginx` afterwards, or nginx answers 502
   for it (or proxies to whichever container now has the old address). The same applies after
   `docker compose restart` and after an upstream restarted by itself: Docker Engine 29 gives
   restarted containers other addresses, and `docker compose restart` restarts all services at
