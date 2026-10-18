@@ -159,10 +159,10 @@ jobs:
             ls ./docker/bake/*.hcl
             echo 'EOF'
             echo 'cache<<EOF'
+            # Read-only: build-all-images.yml owns this cache scope (it writes it outside PRs).
             docker buildx bake "${files[@]}" --print "$TARGET" | jq -r '
               .target | keys[] |
-              "\(.).cache-from=type=gha,scope=\(.)-linux-amd64",
-              "\(.).cache-to=type=gha,scope=\(.)-linux-amd64,mode=max"'
+              "\(.).cache-from=type=gha,scope=\(.)-linux-amd64"'
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 

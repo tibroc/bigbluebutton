@@ -76,6 +76,7 @@ jobs:
         id: bake-files
         env:
           TARGET: ${{ inputs.target }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           files=(-f docker-bake.hcl)
           for f in docker/bake/*.hcl; do files+=(-f "$f"); done
@@ -85,10 +86,12 @@ jobs:
             ls ./docker/bake/*.hcl
             echo 'EOF'
             echo 'cache<<EOF'
-            docker buildx bake "${files[@]}" --print "$TARGET" | jq -r --arg p "$PLATFORM_PAIR" '
+            # Pull requests read the cache but never write it (as automated-tests.yml does).
+            docker buildx bake "${files[@]}" --print "$TARGET" \
+              | jq -r --arg p "$PLATFORM_PAIR" --arg ev "$EVENT_NAME" '
               .target | keys[] |
               "\(.).cache-from=type=gha,scope=\(.)-\($p)",
-              "\(.).cache-to=type=gha,scope=\(.)-\($p),mode=max"'
+              (if $ev != "pull_request" then "\(.).cache-to=type=gha,scope=\(.)-\($p),mode=max" else empty end)'
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
