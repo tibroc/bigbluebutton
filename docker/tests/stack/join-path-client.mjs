@@ -1,6 +1,7 @@
 // Client part of join-path.sh: does what the html5 client does when a user joins, up to the
-// GraphQL subscription, and prints `STEP <name>: OK|FAIL ...` per step. Runs with Node 24
-// (global fetch and WebSocket), started by join-path.sh in a container on the host network.
+// GraphQL subscription, then joins the meeting, waits for the default presentation and uploads a
+// PDF; prints `STEP <name>: OK|FAIL ...` per step. Runs with Node 24 (global fetch, FormData and
+// WebSocket), started by join-path.sh in a container on the host network.
 //
 // Arguments: BASE_URL (https://<domain>) TIMEOUT_SECONDS. The shared secret is the first line
 // of stdin; it is used only to compute checksums and is never printed.
@@ -12,6 +13,10 @@ import { createHash, randomUUID } from 'node:crypto';
 // node -e: argv[1] is the first argument.
 const [baseUrl, timeoutArg] = process.argv.slice(1);
 const timeoutMs = Number(timeoutArg || 30) * 1000;
+// Conversion of a presentation (download, page count, SVG/PNG/thumbnail per page) takes longer
+// than a request.
+const conversionTimeoutMs = Math.max(timeoutMs, 180_000);
+const UPLOAD_PAGES = 2;
 const base = new URL(baseUrl);
 
 let input = '';
@@ -67,6 +72,7 @@ let created = false;
 
 async function run() {
   let step = 'api-index';
+  let ws;
   try {
     // 1. BBBWeb.index (bigbluebutton-html5/imports/api/bbb-web-api/index.ts:32-38): JSON.
     let res = await get(new URL('/bigbluebutton/api', base), { 'Content-Type': 'application/json' });
@@ -128,8 +134,79 @@ async function run() {
     // 4. connection-manager (bigbluebutton-html5/imports/ui/components/connection-manager/component.tsx:228-289):
     // graphql-ws client on graphqlWebsocketUrl, connection_init with these headers.
     step = 'graphql-ws';
-    const userId = await graphqlWs(index.graphqlWebsocketUrl, sessionToken);
-    ok(step, `connection_ack, user_current userId=${userId}`);
+    ws = await GraphqlWs.open(index.graphqlWebsocketUrl, sessionToken);
+    // The client's first subscription, by name: before the user has joined, graphql-middleware
+    // forwards only the operations in AllowedSubscriptionsForNotInMeetingUsers
+    // (bbb-graphql-middleware/config/Config.go) and drops the others silently.
+    const userSub = ws.subscribe('userCurrentSubscription',
+      'subscription userCurrentSubscription { user_current { userId name authToken joined presenter } }');
+    let user = (await ws.next(userSub, (d) => d?.user_current?.[0]?.userId)).user_current[0];
+    ok(step, `connection_ack, user_current userId=${user.userId}`);
+
+    // 6. presenceManager (bigbluebutton-html5/imports/ui/components/join-handler/presenceManager/
+    // component.tsx:144-153, queries.ts:24-32): the UserJoin mutation with user_current.authToken,
+    // then user_current.joined turns true. The first moderator becomes presenter, which the
+    // presentation views require (pres_presentation: X-Hasura-PresenterInMeeting).
+    step = 'user-join';
+    const { authToken } = user;
+    ws.request('UserJoin',
+      'mutation UserJoin($authToken: String!, $clientType: String!, $clientIsMobile: Boolean!) { userJoinMeeting(authToken: $authToken, clientType: $clientType, clientIsMobile: $clientIsMobile) }',
+      { authToken, clientType: 'HTML5', clientIsMobile: false });
+    user = (await ws.next(userSub, (d) => d?.user_current?.[0]?.joined && d.user_current[0].presenter)).user_current[0];
+    ok(step, `joined=${user.joined} presenter=${user.presenter}`);
+
+    // 7. The presentation list of the uploader (bigbluebutton-html5/imports/ui/components/
+    // whiteboard/queries.ts, PRESENTATIONS_SUBSCRIPTION). bbb-web downloads the default
+    // presentation (beans.presentationService.defaultUploadedPresentation) at create and converts
+    // it; akka-apps reports the converted pages, which reach the client here.
+    step = 'default-presentation';
+    const presSub = ws.subscribe('PresentationsSubscription',
+      'subscription PresentationsSubscription { pres_presentation { presentationId name isDefault current uploadCompleted totalPages totalPagesUploaded uploadErrorMsgKey uploadErrorDetailsJson } }');
+    const converted = (p) => p.uploadCompleted && p.totalPages > 0 && p.totalPagesUploaded === p.totalPages;
+    const failed = (p) => p.uploadErrorMsgKey;
+    let pres = await ws.next(presSub, (d) => d?.pres_presentation?.find((p) => p.isDefault && (converted(p) || failed(p))),
+      conversionTimeoutMs);
+    if (failed(pres)) fail(`conversion failed: ${pres.uploadErrorMsgKey} ${JSON.stringify(pres.uploadErrorDetailsJson ?? '')}`);
+    ok(step, `${JSON.stringify(pres.name)} ${pres.totalPagesUploaded}/${pres.totalPages} pages converted`);
+
+    // 8. Upload as the presentation uploader does (bigbluebutton-html5/imports/ui/components/
+    // actions-bar/media-area/media-sharing/presentation/service.js:44-120, mutation.ts, queries.ts):
+    // request an upload token, read it from pres_presentation_uploadToken, POST the file to
+    // <uploadEndpoint with the token> (settings.yml public.presentation.uploadEndpoint).
+    step = 'upload-presentation';
+    const uploadTemporaryId = `join-path-${randomUUID()}`;
+    const filename = 'join-path.pdf';
+    ws.request('RequestPresentationUploadToken',
+      'mutation RequestPresentationUploadToken($podId: String!, $filename: String!, $uploadTemporaryId: String!) { presentationRequestUploadToken(podId: $podId, filename: $filename, uploadTemporaryId: $uploadTemporaryId) }',
+      { podId: 'DEFAULT_PRESENTATION_POD', filename, uploadTemporaryId });
+    const tokenSub = ws.subscribe('getPresentationUploadToken',
+      'query getPresentationUploadToken($uploadTemporaryId: String!) { pres_presentation_uploadToken(where: {uploadTemporaryId: {_eq: $uploadTemporaryId}}) { presentationId uploadTemporaryId uploadToken } }',
+      { uploadTemporaryId }, { repeatMs: 1000 });
+    const { uploadToken } = (await ws.next(tokenSub, (d) => d?.pres_presentation_uploadToken?.[0]?.uploadToken))
+      .pres_presentation_uploadToken[0];
+    ws.stop(tokenSub);
+    const uploadEndpoint = settings?.public?.presentation?.uploadEndpoint ?? '/bigbluebutton/presentation/upload';
+    const form = new FormData();
+    form.append('fileUpload', new Blob([pdf(UPLOAD_PAGES)], { type: 'application/pdf' }), filename);
+    form.append('conference', meeting.meetingId);
+    form.append('room', meeting.meetingId);
+    form.append('temporaryPresentationId', uploadTemporaryId);
+    form.append('pod_id', 'DEFAULT_PRESENTATION_POD');
+    form.append('is_downloadable', 'false');
+    form.append('current', 'true');
+    res = await fetch(new URL(uploadEndpoint.replace('upload', `${uploadToken}/upload`), base), {
+      method: 'POST',
+      body: form,
+      headers: cookies.size ? { cookie: cookieHeader() } : {},
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const uploadBody = (await res.text()).trim();
+    if (res.status !== 200) fail(`POST upload HTTP ${res.status} ${redact(uploadBody.slice(0, 200))}`);
+    pres = await ws.next(presSub, (d) => d?.pres_presentation?.find((p) => p.name === filename && (converted(p) || failed(p))),
+      conversionTimeoutMs);
+    if (failed(pres)) fail(`conversion failed: ${pres.uploadErrorMsgKey} ${JSON.stringify(pres.uploadErrorDetailsJson ?? '')}`);
+    if (pres.totalPages !== UPLOAD_PAGES) fail(`${filename}: ${pres.totalPages} pages, expected ${UPLOAD_PAGES}`);
+    ok(step, `${JSON.stringify(pres.name)} ${pres.totalPagesUploaded}/${pres.totalPages} pages converted`);
 
     // 5. LiveKit signaling URL handed to the client
     // (bigbluebutton-html5/imports/ui/components/livekit/primary-room/component.tsx:197).
@@ -148,6 +225,7 @@ async function run() {
     console.log(`STEP ${step}: FAIL ${redact(e instanceof StepError ? e.message : e?.cause?.message ?? e)}`);
     return 1;
   } finally {
+    ws?.close();
     if (created) {
       try { await (await get(apiUrl('end', { meetingID }))).text(); } catch { /* best effort */ }
     }
@@ -155,50 +233,153 @@ async function run() {
   return 0;
 }
 
-function graphqlWs(url, sessionToken) {
-  return new Promise((resolve, reject) => {
-    // The browser sends its cookies for the host with the upgrade request, among them bbb-web's
-    // JSESSIONID from the join (Path=/): graphql-middleware forwards them to bbb-web's
-    // checkGraphqlAuthorization, which accepts the session token only with that HTTP session
-    // (bigbluebutton-web/.../ConnectionController.groovy, isSessionTokenValid).
-    // `headers` is undici's extension of the WebSocket constructor (Node 24).
-    const ws = new WebSocket(url, { protocols: ['graphql-transport-ws'], headers: cookies.size ? { cookie: cookieHeader() } : {} });
-    const timer = setTimeout(() => { ws.close(); reject(new StepError(`no answer within ${timeoutMs / 1000}s`)); }, timeoutMs);
-    const done = (fn, v) => { clearTimeout(timer); try { ws.close(); } catch { /* closed */ } fn(v); };
-    ws.onopen = () => ws.send(JSON.stringify({
-      type: 'connection_init',
-      payload: {
-        headers: {
-          [WS_SESSION_HEADER]: sessionToken,
-          'X-ClientSessionUUID': randomUUID(),
-          'X-ClientType': 'HTML5',
-          'X-ClientIsMobile': 'false',
+// GraphQL over WebSocket as the html5 client speaks it (graphql-transport-ws, through
+// graphql-middleware). subscribe() sends an operation and keeps its latest data; next() waits
+// until the data of an operation satisfies a predicate. A `complete` of a subscription (which
+// graphql-middleware sends when it re-establishes the Hasura connection, for example after the
+// user joined) re-sends it; a query with repeatMs is sent again that long after each answer,
+// until stopped.
+class GraphqlWs {
+  static open(url, sessionToken) {
+    return new Promise((resolve, reject) => {
+      // The browser sends its cookies for the host with the upgrade request, among them bbb-web's
+      // JSESSIONID from the join (Path=/): graphql-middleware forwards them to bbb-web's
+      // checkGraphqlAuthorization, which accepts the session token only with that HTTP session
+      // (bigbluebutton-web/.../ConnectionController.groovy, isSessionTokenValid).
+      // `headers` is undici's extension of the WebSocket constructor (Node 24).
+      const ws = new WebSocket(url, { protocols: ['graphql-transport-ws'], headers: cookies.size ? { cookie: cookieHeader() } : {} });
+      const conn = new GraphqlWs(ws);
+      const timer = setTimeout(() => { ws.close(); reject(new StepError(`no connection_ack within ${timeoutMs / 1000}s`)); }, timeoutMs);
+      conn.onAck = () => { clearTimeout(timer); resolve(conn); };
+      conn.onFatal = (e) => { clearTimeout(timer); reject(e); };
+      ws.onopen = () => ws.send(JSON.stringify({
+        type: 'connection_init',
+        payload: {
+          headers: {
+            [WS_SESSION_HEADER]: sessionToken,
+            'X-ClientSessionUUID': randomUUID(),
+            'X-ClientType': 'HTML5',
+            'X-ClientIsMobile': 'false',
+          },
         },
-      },
-    }));
-    ws.onmessage = (ev) => {
-      const msg = JSON.parse(ev.data);
-      if (process.env.JOIN_PATH_DEBUG) console.error('ws <', String(ev.data).slice(0, 300));
-      if (msg.type === 'connection_ack') {
-        // The client's first subscription, by name: before the user has joined, graphql-middleware
-        // forwards only the operations in AllowedSubscriptionsForNotInMeetingUsers
-        // (bbb-graphql-middleware/config/Config.go) and drops the others silently.
-        ws.send(JSON.stringify({
-          id: '1',
-          type: 'subscribe',
-          payload: { operationName: 'userCurrentSubscription', query: 'subscription userCurrentSubscription { user_current { userId name } }' },
-        }));
-      } else if (msg.type === 'next' && msg.id === '1') {
-        const user = msg.payload?.data?.user_current?.[0];
-        if (user?.userId) done(resolve, user.userId);
-        else done(reject, new StepError(`unexpected data ${JSON.stringify(msg.payload).slice(0, 300)}`));
-      } else if (msg.type === 'error') {
-        done(reject, new StepError(`error ${JSON.stringify(msg.payload).slice(0, 300)}`));
-      }
-    };
-    ws.onerror = (ev) => done(reject, new StepError(`websocket error ${ev?.message ?? ''}`));
-    ws.onclose = (ev) => done(reject, new StepError(`closed code=${ev.code} reason=${ev.reason}`));
-  });
+      }));
+    });
+  }
+
+  constructor(ws) {
+    this.ws = ws;
+    this.ops = new Map();
+    this.waiters = new Set();
+    this.seq = 0;
+    this.closed = false;
+    ws.onmessage = (ev) => this.message(ev);
+    ws.onerror = (ev) => this.fatal(new StepError(`websocket error ${ev?.message ?? ''}`));
+    ws.onclose = (ev) => this.fatal(new StepError(`websocket closed code=${ev.code} reason=${ev.reason}`));
+  }
+
+  send(msg) { this.ws.send(JSON.stringify(msg)); }
+
+  start(op) {
+    this.send({ id: op.id, type: 'subscribe', payload: { operationName: op.name, query: op.query, variables: op.variables } });
+  }
+
+  // subscribe(NAME, QUERY, VARIABLES, {repeatMs}) -> operation id
+  subscribe(name, query, variables = {}, { repeatMs = 0 } = {}) {
+    const op = { id: String(++this.seq), name, query, variables, data: undefined, repeatMs, timer: null };
+    this.ops.set(op.id, op);
+    this.start(op);
+    return op.id;
+  }
+
+  // request(NAME, QUERY, VARIABLES): a mutation; its result is not needed.
+  request(name, query, variables = {}) { return this.subscribe(name, query, variables); }
+
+  stop(id) {
+    const op = this.ops.get(id);
+    if (!op) return;
+    clearTimeout(op.timer);
+    this.ops.delete(id);
+    try { this.send({ id, type: 'complete' }); } catch { /* closed */ }
+  }
+
+  // next(ID, PREDICATE, TIMEOUT_MS): the first data of ID (current or coming) for which PREDICATE
+  // returns a truthy value; resolves to that value if it is an object, else to the data.
+  next(id, predicate, waitMs = timeoutMs) {
+    return new Promise((resolve, reject) => {
+      const w = { id, predicate, resolve, reject, last: undefined };
+      w.timer = setTimeout(() => {
+        this.waiters.delete(w);
+        reject(new StepError(`no matching data within ${waitMs / 1000}s; last: ${JSON.stringify(this.ops.get(id)?.data ?? null).slice(0, 400)}`));
+      }, waitMs);
+      this.waiters.add(w);
+      this.check(w);
+    });
+  }
+
+  check(w) {
+    const data = this.ops.get(w.id)?.data;
+    if (data === undefined) return;
+    const v = w.predicate(data);
+    if (!v) return;
+    clearTimeout(w.timer);
+    this.waiters.delete(w);
+    w.resolve(v !== null && typeof v === 'object' ? v : data);
+  }
+
+  message(ev) {
+    const msg = JSON.parse(ev.data);
+    if (process.env.JOIN_PATH_DEBUG) console.error('ws <', String(ev.data).slice(0, 300));
+    if (msg.type === 'connection_ack') { this.onAck?.(); return; }
+    if (msg.type === 'ping') { this.send({ type: 'pong' }); return; }
+    const op = this.ops.get(msg.id);
+    if (!op) return;
+    if (msg.type === 'next') {
+      if (msg.payload?.errors) { this.fatal(new StepError(`${op.name}: ${JSON.stringify(msg.payload.errors).slice(0, 300)}`)); return; }
+      op.data = msg.payload?.data;
+      for (const w of [...this.waiters]) if (w.id === op.id) this.check(w);
+    } else if (msg.type === 'error') {
+      this.fatal(new StepError(`${op.name}: error ${JSON.stringify(msg.payload).slice(0, 300)}`));
+    } else if (msg.type === 'complete' && op.repeatMs) {
+      // a query: asked again, as the uploader polls for its upload token
+      op.timer = setTimeout(() => { if (this.ops.has(op.id) && !this.closed) this.start(op); }, op.repeatMs);
+    } else if (msg.type === 'complete' && !op.query.startsWith('mutation')) {
+      this.start(op);
+    }
+  }
+
+  fatal(e) {
+    if (this.closed) return;
+    this.closed = true;
+    this.onFatal?.(e);
+    for (const w of this.waiters) { clearTimeout(w.timer); w.reject(e); }
+    this.waiters.clear();
+    for (const op of this.ops.values()) clearTimeout(op.timer);
+  }
+
+  close() {
+    this.closed = true;
+    for (const op of this.ops.values()) clearTimeout(op.timer);
+    try { this.ws.close(); } catch { /* closed */ }
+  }
+}
+
+// A PDF with N pages of text, built by hand (offsets in the xref table are byte offsets).
+function pdf(pages) {
+  const objs = ['<< /Type /Catalog /Pages 2 0 R >>', null, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+  const kids = [];
+  for (let i = 1; i <= pages; i += 1) {
+    const content = `BT /F1 48 Tf 72 640 Td (join-path page ${i}) Tj ET`;
+    kids.push(`${objs.length + 1} 0 R`);
+    objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${objs.length + 2} 0 R >>`);
+    objs.push(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
+  }
+  objs[1] = `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${pages} >>`;
+  let out = '%PDF-1.4\n';
+  const offsets = objs.map((o, i) => { const off = out.length; out += `${i + 1} 0 obj\n${o}\nendobj\n`; return off; });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`;
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, 'latin1');
 }
 
 process.exit(await run());

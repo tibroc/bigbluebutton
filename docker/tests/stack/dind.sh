@@ -11,7 +11,8 @@
 #                      compose file (localhost/bbb-<image>:TAG, built with
 #                      docker/tests/buildkit/build.sh --tag TAG). Images pinned by digest
 #                      (redis) are pulled by the Engine instead.
-#   up                 docker compose up -d --wait, certbot scaled to 0, then restart nginx
+#   up                 issue the test certificate (see below), docker compose up -d --wait,
+#                      certbot scaled to 0, then restart nginx
 #   test [ARG...]      docker/tests/stack/join-path.sh against the stack (ARGs passed on)
 #   compose ARG...     docker compose ARG... for the stack
 #   docker ARG...      docker ARG... in the Engine
@@ -25,9 +26,12 @@
 # The Engine runs in a privileged podman container (rootless podman: privileged within the user
 # namespace only) with the repository mounted read-only at /src. The stack uses
 # docker/tests/stack/fixture.env (fixture values only, docs: docker/README.md "Testing"):
-# images from `localhost`, the self-signed certificate of haproxy, certbot scaled to 0, so no
-# ACME request is ever made. Ports are published inside the Engine container's network
-# namespace only; nothing is published on the host.
+# images from `localhost`, certbot scaled to 0, so no ACME request is ever made. In its place,
+# `up` issues a certificate for BBB_DOMAIN from a throwaway test CA (created in the Engine, its
+# key discarded after signing) and writes it into the `certs` volume as certbot would;
+# docker/tests/stack/compose.test.yml makes bbb-web's JVM trust that CA, as a deployment's JVM
+# trusts the public CA of its certificate. Ports are published inside the Engine container's
+# network namespace only; nothing is published on the host.
 #
 # Exit status: that of the command; 2 on usage or engine errors.
 
@@ -55,9 +59,60 @@ require_running() { running || die "the Engine container $NAME is not running (d
 # in_engine ARG...: run ARG... in the Engine container, stdin attached.
 in_engine() { podman exec -i -e BBB_IMAGE_TAG="$TAG" "$NAME" "$@"; }
 
+COMPOSE_ARGS="--project-directory /src -f /src/docker-compose.yml -f /src/docker/tests/stack/compose.test.yml --env-file /src/docker/tests/stack/fixture.env"
+
 compose() {
-    in_engine docker compose --project-directory /src -f /src/docker-compose.yml \
-        --env-file /src/docker/tests/stack/fixture.env "$@"
+    # shellcheck disable=SC2086 # COMPOSE_ARGS is a fixed list of words without spaces
+    in_engine docker compose $COMPOSE_ARGS "$@"
+}
+
+# Volumes of the test certificate (Engine-local; removed with the Engine by `stop`).
+PKI_VOLUME=bbb-test-pki
+TRUSTSTORE_VOLUME=bbb-test-truststore
+
+# test_pki: a test CA and a certificate for BBB_DOMAIN signed by it (kept in PKI_VOLUME: the CA
+# certificate and the haproxy bundle, certificate and key, as bbb-certbot-deploy-hook writes it);
+# a copy of bbb-web's Java truststore with the CA added (TRUSTSTORE_VOLUME). Idempotent.
+test_pki() {
+    local domain
+    domain="$(sed -n 's/^BBB_DOMAIN=//p' "$HERE/fixture.env")"
+    [ -n "$domain" ] || die "BBB_DOMAIN is not set in fixture.env"
+    in_engine docker volume create "$PKI_VOLUME" >/dev/null
+    in_engine docker volume create "$TRUSTSTORE_VOLUME" >/dev/null
+    # shellcheck disable=SC2016 # expanded by the shell in the container
+    in_engine docker run --rm --user 0 --entrypoint sh -v "$PKI_VOLUME:/pki" "localhost/bbb-haproxy:$TAG" -ec '
+        cd /pki
+        [ -s certbundle.pem ] && [ -s ca.pem ] && exit 0
+        umask 077
+        openssl req -x509 -newkey rsa:2048 -sha256 -days 30 -nodes -subj "/CN=BBB stack test CA" \
+            -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" \
+            -keyout ca.key -out ca.pem 2>/dev/null
+        openssl req -newkey rsa:2048 -nodes -subj "/CN=$1" -keyout server.key -out server.csr 2>/dev/null
+        printf "subjectAltName=DNS:%s\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\n" "$1" >ext.cnf
+        openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 30 -sha256 \
+            -extfile ext.cnf -out server.pem 2>/dev/null
+        { cat server.pem; echo; cat server.key; } >certbundle.pem
+        rm -f ca.key ca.srl server.csr server.key server.pem ext.cnf
+        chmod 0644 ca.pem
+        echo "issued a test certificate for $1"
+    ' sh "$domain"
+    # shellcheck disable=SC2016 # expanded by the shell in the container
+    in_engine docker run --rm --user 0 --entrypoint bash -v "$PKI_VOLUME:/pki:ro" -v "$TRUSTSTORE_VOLUME:/out" \
+        "localhost/bbb-web:$TAG" -ec '
+        [ -s /out/cacerts ] && keytool -list -keystore /out/cacerts -storepass changeit -alias bbb-stack-test-ca >/dev/null 2>&1 && exit 0
+        cp /etc/ssl/certs/java/cacerts /out/cacerts.tmp
+        keytool -importcert -noprompt -alias bbb-stack-test-ca -file /pki/ca.pem -keystore /out/cacerts.tmp -storepass changeit >/dev/null
+        chmod 0644 /out/cacerts.tmp
+        mv -f /out/cacerts.tmp /out/cacerts
+        echo "added the test CA to a copy of the Java truststore"
+    '
+}
+
+# install_certificate: the bundle into the stack's `certs` volume (created by `up --no-start`),
+# with the mode and owner bbb-certbot-deploy-hook gives it (haproxy's UID/GID 99).
+install_certificate() {
+    in_engine docker run --rm --user 0 --entrypoint sh -v "$PKI_VOLUME:/pki:ro" -v bigbluebutton_certs:/certs \
+        "localhost/bbb-haproxy:$TAG" -ec 'install -o 99 -g 99 -m 0640 /pki/certbundle.pem /certs/certbundle.pem'
 }
 
 start() {
@@ -103,6 +158,9 @@ load() {
 
 up() {
     require_running
+    test_pki
+    compose up --no-start --scale certbot=0
+    install_certificate
     # --wait: returns once every service is running and healthy (db-init: exited 0). Then
     # nginx is restarted, as after every `up -d` that may have recreated one of its upstreams
     # (docker/README.md, "Restart nginx after recreating an upstream").
@@ -121,7 +179,7 @@ case "$cmd" in
         require_running
         BBB_SHARED_SECRET="$(sed -n 's/^BBB_SHARED_SECRET=//p' "$HERE/fixture.env")" \
             "$HERE/join-path.sh" --insecure --docker "podman exec -i $NAME docker" \
-            --compose "podman exec -i $NAME docker compose --project-directory /src -f /src/docker-compose.yml --env-file /src/docker/tests/stack/fixture.env" \
+            --compose "podman exec -i $NAME docker compose $COMPOSE_ARGS" \
             --client-image "localhost/bbb-graphql-actions:$TAG" "$@"
         ;;
     compose) require_running; compose "$@" ;;

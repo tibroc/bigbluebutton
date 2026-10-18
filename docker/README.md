@@ -212,22 +212,27 @@ docker/tests/buildkit/build.sh --tag 4.0.1 graphql-server        # then apps-akk
                                                                  # shared-notes, bbb-webrtc-sfu, nginx
 docker/tests/stack/dind.sh start     # Docker Engine in a privileged podman container
 docker/tests/stack/dind.sh load      # copies the images of docker-compose.yml from podman
-docker/tests/stack/dind.sh up        # docker compose up -d --wait, certbot scaled to 0
-docker/tests/stack/dind.sh test      # join-path.sh, including two restart cycles
+docker/tests/stack/dind.sh up        # test certificate, docker compose up -d --wait, no certbot
+docker/tests/stack/dind.sh test      # join-path.sh, including three restart cycles
 docker/tests/stack/dind.sh compose logs akka-apps   # any docker compose command
 docker/tests/stack/dind.sh stop      # removes the Engine container and all its data
 ```
 
-The stack runs with `docker/tests/stack/fixture.env` (fixture values, `bbb.example.com`, the
-self-signed certificate; certbot is scaled to 0, so no ACME request is made). Its ports are
-published inside the Engine container only. `join-path.sh` does what the html5 client does when
-a user joins: API create and join, the redirect to the client with the session token,
-`/api/rest/meetingStaticData` (Hasura, authenticated through akka-apps), the GraphQL WebSocket
-through graphql-middleware up to the first subscription, and the LiveKit signaling URL. Then it
-runs `docker compose restart` and, as a second cycle, restarts every service while redis is
-stopped; after each cycle it waits until all services are healthy, restarts nginx (see above) and
-repeats the join path. It prints `STEP <name>: OK|FAIL` and exits non-zero on failure. On a
-Docker host, run it directly in the directory of `docker-compose.yml`:
+The stack runs with `docker/tests/stack/fixture.env` (fixture values, `bbb.example.com`;
+certbot is scaled to 0, so no ACME request is made). In its place, `up` issues a certificate for
+`bbb.example.com` from a throwaway test CA and puts it into the `certs` volume as certbot would;
+`docker/tests/stack/compose.test.yml` makes bbb-web trust that CA, as a deployment's JVM trusts
+the CA of its certificate. Its ports are published inside the Engine container only.
+`join-path.sh` does what the html5 client does when a user joins: API create and join, the
+redirect to the client with the session token, `/api/rest/meetingStaticData` (Hasura,
+authenticated through akka-apps), the GraphQL WebSocket through graphql-middleware, the join
+mutation, the default presentation converted (bbb-web loads it from
+`https://bbb.example.com/default.pdf` through haproxy), a two-page PDF uploaded as the
+presentation uploader does and converted, and the LiveKit signaling URL. Then it runs `docker
+compose restart`, as a second cycle `docker compose restart redis`, and as a third cycle restarts
+every service while redis is stopped; after each cycle it waits until all services are healthy,
+restarts nginx (see above) and repeats the join path. It prints `STEP <name>: OK|FAIL` and exits
+non-zero on failure. On a Docker host, run it directly in the directory of `docker-compose.yml`:
 `BBB_SHARED_SECRET=... docker/tests/stack/join-path.sh --domain <domain> --connect-ip ''`
 (add `--insecure` for a self-signed certificate; `--help` lists the options).
 
