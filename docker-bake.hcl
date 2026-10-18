@@ -73,5 +73,6 @@ group "default" {
         "shared-notes",
         "bbb-webrtc-sfu",
         "certbot",
+        "webhooks",
     ]
 }

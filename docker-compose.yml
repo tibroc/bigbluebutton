@@ -439,6 +439,31 @@ services:
       start_period: 10s
       retries: 3
 
+  # Optional, as on bare metal (BBB_FEATURES=webhooks). nginx proxies /bigbluebutton/api/hooks
+  # to it; it reads the meeting events from redis.
+  webhooks:
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-webhooks:${BBB_IMAGE_TAG:-4.0.1}
+    profiles: [webhooks]
+    restart: unless-stopped
+    environment:
+      BBB_DOMAIN: ${BBB_DOMAIN}
+      BBB_SHARED_SECRET: ${BBB_SHARED_SECRET}
+      WEBHOOKS_BEARER_AUTH: ${WEBHOOKS_BEARER_AUTH:-true}
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - bbb
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "/usr/local/lib/bbb/bbb-webhooks-healthcheck.js"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
 networks:
   bbb:
     ipam:
