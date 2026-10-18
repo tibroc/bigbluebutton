@@ -19,7 +19,9 @@
 FROM docker.io/library/postgres@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
 
 # BBB's packaged server settings (max_connections), copied as bare metal installs them
-# (build/packages-template/bbb-graphql-server/build.sh). DL3022: named build context.
+# (build/packages-template/bbb-graphql-server/build.sh), into a directory traversable by any UID
+# (docker/README.md). DL3022: named build context.
+RUN install -d -m 0755 /etc/postgresql/16/main/conf.d
 # hadolint ignore=DL3022
 COPY --from=graphql-server-pkg --chmod=0644 bbb-pg.conf /etc/postgresql/16/main/conf.d/bbb-pg.conf
 

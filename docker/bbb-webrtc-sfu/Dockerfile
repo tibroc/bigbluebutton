@@ -71,6 +71,8 @@ RUN bash /build/configure.sh /build/bbb-webrtc-sfu \
 FROM docker.io/library/node@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5
 
 COPY --from=build /build/bbb-webrtc-sfu /usr/local/bigbluebutton/bbb-webrtc-sfu
+# The helpers' directory is created first, traversable by any UID (docker/README.md).
+RUN install -d -m 0755 /usr/local/lib/bbb
 # DL3022: entrypoint-lib is a named build context, not a stage.
 # hadolint ignore=DL3022
 COPY --from=entrypoint-lib --chmod=0644 entrypoint-lib.sh /usr/local/lib/bbb/entrypoint-lib.sh

@@ -23,9 +23,12 @@ FROM docker.io/library/nginx@sha256:970364228b1e4f932abc22d321932816782cca8a20b8
 USER 0
 
 # bash for the entrypoint helper, envsubst for bbb_render. curl (healthcheck) is part of the
-# base image. The base image's default site would add a second server on port 80.
+# base image. The base image's default site would add a second server on port 80. The
+# directories of the files copied below, traversable by any UID (docker/README.md).
 RUN apk add --no-cache bash gettext-envsubst \
-    && rm -f /etc/nginx/conf.d/default.conf
+    && rm -f /etc/nginx/conf.d/default.conf \
+    && install -d -m 0755 /usr/local/share/bbb/nginx/fragments /usr/share/bigbluebutton \
+        /usr/local/lib/bbb
 
 # Location fragments, under the names the packages install them with (the build.sh of each
 # package; bbb-web's fragment is `web`). default-fe.nginx is written by bbb-install.

@@ -81,6 +81,8 @@ FROM docker.io/library/alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db8
 RUN apk add --no-cache bash
 
 COPY --from=build /src/bbb-graphql-middleware /usr/bin/bbb-graphql-middleware
+# Directories of the files below, traversable by any UID (docker/README.md).
+RUN install -d -m 0755 /usr/share/bbb-graphql-middleware /usr/local/lib/bbb
 COPY --from=config --chmod=0644 /build/config/config.yml /usr/share/bbb-graphql-middleware/config.yml
 # DL3022: entrypoint-lib is a named build context, not a stage.
 # hadolint ignore=DL3022

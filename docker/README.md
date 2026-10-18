@@ -10,7 +10,7 @@ without a source directory live in `docker/<name>/`.
 | `docker/bake/<image>.hcl` | the bake target(s) of one image |
 | `docker/java-base/` | Java 21 runtime base for the JVM images |
 | `docker/lib/` | shared entrypoint helper (`entrypoint-lib.sh`, see `docker/lib/README.md`) |
-| `docker/tests/` | tests: helper, UID/GID check, lint, golden files, compose, smoke |
+| `docker/tests/` | tests: helper, UID/GID check, directory modes, BuildKit build, lint, golden files, compose, smoke |
 | `docker/.hadolint.yaml` | hadolint rules for all Dockerfiles |
 
 ## Building
@@ -94,9 +94,16 @@ target "web" {
 ```
 
 ```dockerfile
+RUN install -d -m 0755 /usr/local/lib/bbb
 # hadolint ignore=DL3022
 COPY --from=entrypoint-lib --chmod=0644 entrypoint-lib.sh /usr/local/lib/bbb/entrypoint-lib.sh
 ```
+
+Create every directory that a `COPY --chmod` writes into before the `COPY`, with
+`install -d -m 0755`: BuildKit gives the directories it creates for the `COPY` the `--chmod`
+mode too, so with `0644` no other user can enter them (podman/buildah creates them with
+`0755`). `docker/tests/dirmodes/check.sh IMAGE` finds such directories, and
+`docker/tests/buildkit/build.sh TARGET` builds with BuildKit on a host that has only podman.
 
 Images built on the Java base already contain the helper at that path. Without bake, pass the
 context directly: `podman build --build-context entrypoint-lib=docker/lib ...` (or

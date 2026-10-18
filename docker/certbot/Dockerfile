@@ -23,8 +23,10 @@ RUN apt-get update \
 # points of the three volumes: letsencrypt at /etc/letsencrypt (certbot's state),
 # certs at /etc/haproxy/certs (the haproxy bundle) and acme-webroot at the ACME challenge
 # directory below the webroot (bbb-install: certbot -w /var/www/bigbluebutton-default/assets).
+# The directories of the files copied below, traversable by any UID.
 RUN install -d -m 1777 /etc/bbb-certbot /etc/letsencrypt /etc/haproxy/certs \
-        /var/www/bigbluebutton-default/assets/.well-known/acme-challenge
+        /var/www/bigbluebutton-default/assets/.well-known/acme-challenge \
+    && install -d -m 0755 /usr/local/lib/bbb /usr/local/share/bbb/certbot
 
 # Shared entrypoint helper (P3). DL3022: entrypoint-lib is a named build context, not a stage.
 # hadolint ignore=DL3022

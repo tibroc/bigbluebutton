@@ -5,10 +5,12 @@ FROM docker.io/coturn/coturn@sha256:01fc8655e7c262fa4ccfb8dca74ff80fb372b0ee021e
 
 USER 0:0
 
-# envsubst for the entrypoint helper
+# envsubst for the entrypoint helper; the directories of the files copied below, traversable
+# by any UID (docker/README.md).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gettext-base \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && install -d -m 0755 /usr/local/lib/bbb /usr/local/share/bbb/templates
 
 # hadolint ignore=DL3022
 COPY --from=entrypoint-lib --chmod=0644 entrypoint-lib.sh /usr/local/lib/bbb/entrypoint-lib.sh

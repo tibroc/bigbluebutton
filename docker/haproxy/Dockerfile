@@ -17,9 +17,11 @@ USER 0
 # self-signed certificate. socat (healthcheck) is part of the base image.
 # Writable for any UID: /etc/haproxy (rendered config, certificate and error page symlinks),
 # /run/haproxy (sockets, self-signed certificate) and /etc/haproxy/certs, the mount point of
-# the volume with the issued bundle (read-only for haproxy).
+# the volume with the issued bundle (read-only for haproxy). The directories of the files
+# copied below, traversable by any UID (docker/README.md).
 RUN apk add --no-cache bash gettext-envsubst openssl \
-    && install -d -m 1777 /etc/haproxy /etc/haproxy/certs /run/haproxy
+    && install -d -m 1777 /etc/haproxy /etc/haproxy/certs /run/haproxy \
+    && install -d -m 0755 /usr/local/lib/bbb /usr/local/share/bbb/haproxy
 
 # Shared entrypoint helper (P3). DL3022: entrypoint-lib is a named build context, not a stage.
 # hadolint ignore=DL3022

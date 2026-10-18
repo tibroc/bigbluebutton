@@ -12,6 +12,10 @@
 # postgres:16.15-trixie
 FROM docker.io/library/postgres@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
 
+# The directories of the files copied below, traversable by any UID (docker/README.md).
+RUN install -d -m 0755 /usr/local/lib/bbb /usr/share/bbb-graphql-server \
+        /usr/share/bbb-shared-notes-server /usr/share/bbb-db-init
+
 # DL3022 (here and below): named build contexts, not stages.
 # hadolint ignore=DL3022
 COPY --from=entrypoint-lib --chmod=0644 entrypoint-lib.sh /usr/local/lib/bbb/entrypoint-lib.sh

@@ -91,10 +91,13 @@ SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
 
 # The engine's shared libraries (libpq5, libodbc2, libgmp10; libkrb5-3 and libnuma1 as the
 # package depends on them, opts-noble.sh), curl for the healthcheck, envsubst for the helper.
+# The directories of the files copied below, traversable by any UID (docker/README.md).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gettext-base \
         libgmp10 libkrb5-3 libnuma1 libodbc2 libpq5 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && install -d -m 0755 /usr/share/bbb-graphql-server /usr/local/share/bbb/templates \
+        /usr/local/lib/bbb
 
 COPY --from=build /build/hasura-graphql-engine /build/hasura /usr/bin/
 COPY --from=build /usr/local/bin/yq /usr/local/bin/yq
