@@ -52,9 +52,13 @@ FROM java-base
 COPY --from=build /bbb-apps-akka/target/universal/stage /usr/share/bbb-apps-akka
 # akka-apps reads the HTML5 client settings and hands them to clients (ClientSettings.scala);
 # the override /etc/bigbluebutton/bbb-html5.yml is merged over them if mounted (Tier 3).
-# Its directory is created first, traversable by any UID (docker/README.md).
+# Its directory is created first, traversable by any UID (docker/README.md). The override ships
+# empty ({}), as bare metal always has the file (without it akka-apps logs an error at every
+# start); an admin's file is bind-mounted over it.
+RUN install -d -m 0755 /usr/share/bigbluebutton/html5-client/private/config /etc/bigbluebutton \
+    && printf '{}\n' > /etc/bigbluebutton/bbb-html5.yml \
+    && chmod 0644 /etc/bigbluebutton/bbb-html5.yml
 # DL3022: html5-config is a named build context, not a stage.
-RUN install -d -m 0755 /usr/share/bigbluebutton/html5-client/private/config
 # hadolint ignore=DL3022
 COPY --from=html5-config --chmod=0644 settings.yml /usr/share/bigbluebutton/html5-client/private/config/settings.yml
 COPY --chmod=0755 docker/entrypoint.sh /entrypoint.sh

@@ -171,15 +171,19 @@ services:
       - /etc/bigbluebutton/bbb-web.properties:/etc/bigbluebutton/bbb-web.properties:ro
 ```
 
-akka-apps always gets `/etc/bigbluebutton/bbb-html5.yml`, the html5 client settings override,
-as the compose config `bbb-html5` with the content `{}` (bare metal always has this file;
-without it akka-apps logs an error at every start). To use your own file, replace the config:
+The akka-apps image ships `/etc/bigbluebutton/bbb-html5.yml`, the html5 client settings
+override, with the content `{}` (bare metal always has this file; without it akka-apps logs an
+error at every start). To use your own file, mount it over the shipped one:
 
 ```yaml
-configs:
-  bbb-html5: !override
-    file: /etc/bigbluebutton/bbb-html5.yml
+services:
+  akka-apps:
+    volumes:
+      - /etc/bigbluebutton/bbb-html5.yml:/etc/bigbluebutton/bbb-html5.yml:ro
 ```
+
+Compose `configs:` with inline `content:` cannot be used here: Docker Compose writes such a config
+into the container at start, which fails on the read-only root filesystem (RB-04, 2026-10-18).
 
 ## Running under an arbitrary UID/GID
 

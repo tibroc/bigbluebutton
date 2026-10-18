@@ -151,11 +151,8 @@ services:
     read_only: true
     tmpfs:
       - /tmp
-    # The html5 client settings override (Tier 3), empty by default. Replace it with your file
-    # in a compose override (docker/README.md, "Override files").
-    configs:
-      - source: bbb-html5
-        target: /etc/bigbluebutton/bbb-html5.yml
+    # The html5 client settings override (Tier 3) ships empty in the image; mount your file over
+    # it in a compose override (docker/README.md, "Override files").
     networks:
       - bbb
     depends_on:
@@ -419,7 +416,3 @@ volumes:
   certs:
   acme-webroot:
   letsencrypt:
-
-configs:
-  bbb-html5:
-    content: "{}\n"
