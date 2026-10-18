@@ -12,11 +12,11 @@ FROM docker.io/library/ubuntu@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d
 ARG YQ_VERSION=4.53.2
 ADD https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64 /yq/yq_linux_amd64
 COPY bbb-yq-go/bbb-yq-go.sha256sum /yq/
+WORKDIR /yq
 RUN arch="$(dpkg --print-architecture)" \
     && if [ "$arch" != "amd64" ]; then \
         echo "upstream bbb-yq-go.sha256sum only covers amd64, not $arch" >&2; exit 1; \
     fi \
-    && cd /yq \
     && sha256sum -c --ignore-missing --strict bbb-yq-go.sha256sum \
     && install -m 0755 yq_linux_amd64 /usr/local/bin/yq
 

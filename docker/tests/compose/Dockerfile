@@ -18,11 +18,13 @@ ARG COMPOSE_VERSION=2.40.3
 ARG COMPOSE_SHA256=dba9d98e1ba5bfe11d88c99b9bd32fc4a0624a30fafe68eea34d61a3e42fd372
 ADD https://github.com/docker/compose/releases/download/v${COMPOSE_VERSION}/docker-compose-linux-x86_64 /compose/docker-compose
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+WORKDIR /yq
 RUN arch="$(dpkg --print-architecture)" \
     && if [ "$arch" != "amd64" ]; then \
         echo "upstream bbb-yq-go.sha256sum only covers amd64, not $arch" >&2; exit 1; \
     fi \
-    && (cd /yq && sha256sum -c --ignore-missing --strict bbb-yq-go.sha256sum) \
+    && sha256sum -c --ignore-missing --strict bbb-yq-go.sha256sum \
     && echo "${COMPOSE_SHA256}  /compose/docker-compose" | sha256sum -c --strict \
     && install -m 0755 /yq/yq_linux_amd64 /usr/local/bin/yq \
     && install -m 0755 /compose/docker-compose /usr/local/bin/docker-compose
