@@ -444,6 +444,8 @@ networks:
     ipam:
       config:
         - subnet: ${BBB_NETWORK_SUBNET:-172.30.82.0/24}
+          # Dynamic addresses only from here; the fixed ones (livekit, redis) lie outside it.
+          ip_range: ${BBB_NETWORK_IP_RANGE:-172.30.82.128/25}
   # shared-notes and the services it talks to (compose.md "Networks", OQ-21).
   notes:
     internal: true

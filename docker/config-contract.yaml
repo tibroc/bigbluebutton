@@ -502,12 +502,52 @@ variables:
     setup: null
     description: >-
       Fixed address of LiveKit in BBB_NETWORK_SUBNET; the only peer coturn relays to. Must lie
-      inside BBB_NETWORK_SUBNET (checked by preflight).
+      inside BBB_NETWORK_SUBNET and outside BBB_NETWORK_IP_RANGE (checked by preflight).
     consumers: [compose, coturn]
     example: '172.30.82.20'
     status: draft
     sources:
       - bbb-install.sh:1937-1941 @ 2547823185 — denied-peer-ip all, allowed-peer-ip one address
+
+  - name: BBB_REDIS_IP
+    tier: 2
+    required: false
+    secret: false
+    default: '172.30.82.21'
+    pattern: '((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])'
+    setup: null
+    description: >-
+      Fixed address of redis in BBB_NETWORK_SUBNET. akka-apps and bbb-web (lettuce/netty) cache the
+      resolved redis address for the DNS record's TTL (600 s from Docker's embedded DNS) and have no
+      setting to shorten it, so a recreated redis with a new address would break joins for up to
+      10 minutes. Must lie inside BBB_NETWORK_SUBNET and outside BBB_NETWORK_IP_RANGE.
+    consumers: [compose]
+    example: '172.30.82.21'
+    status: draft
+    notes: >-
+      Decided by the supervisor under the standing authorization (2026-10-19, T-052, reviews/T-052.md);
+      bare metal reaches redis at 127.0.0.1, Kubernetes Services have stable addresses. A client-side
+      DNS TTL bound needs an upstream code change (lettuce ClientResources in RedisClientProvider).
+    sources:
+      - bbb-common-message/src/main/scala/org/bigbluebutton/common2/redis/RedisClientProvider.scala:20-24 @ 35cad46a9f — RedisClient.create(redisUri) with default ClientResources (netty DNS resolver, record TTL)
+
+  - name: BBB_NETWORK_IP_RANGE
+    tier: 2
+    required: false
+    secret: false
+    default: '172.30.82.128/25'
+    pattern: '((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])/(1[6-9]|2[0-9]|3[0-2])'
+    setup: null
+    description: >-
+      Part of BBB_NETWORK_SUBNET from which Docker assigns dynamic addresses (compose `ip_range`).
+      The fixed addresses (BBB_LIVEKIT_IP, BBB_REDIS_IP) lie outside it, so a container started while
+      LiveKit or redis restarts cannot take their address. Must lie inside BBB_NETWORK_SUBNET.
+    consumers: [compose]
+    example: '172.30.82.128/25'
+    status: draft
+    notes: Supervisor decision 2026-10-19 (reviews/T-052.md major finding).
+    sources:
+      - docker-compose.yml:370 @ 25ae961825 — LiveKit's fixed address without an ip_range (collision risk)
 
   - name: POSTGRES_BBB_CORE_PASSWORD
     tier: 2

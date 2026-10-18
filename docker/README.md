@@ -202,6 +202,16 @@ services:
 Compose `configs:` with inline `content:` cannot be used here: Docker Compose writes such a config
 into the container at start, which fails on the read-only root filesystem (RB-04, 2026-10-18).
 
+## Fixed addresses on the `bbb` network
+
+LiveKit (`BBB_LIVEKIT_IP`, coturn relays only to it) and redis (`BBB_REDIS_IP`) have fixed
+addresses. akka-apps and bbb-web cache redis's resolved address for the DNS record's TTL (600 s
+from Docker's embedded DNS), so a redis container recreated with a new address would break joins
+for up to ten minutes. Docker assigns all other addresses from `BBB_NETWORK_IP_RANGE`
+(compose `ip_range`, default the upper half of `BBB_NETWORK_SUBNET`); keep the fixed addresses
+inside the subnet and outside that range. Kubernetes Services have stable addresses, so nothing
+corresponds to this there.
+
 ## Testing the stack with Docker Engine
 
 Docker and podman differ in details that break images at run time (the embedded DNS server,
@@ -234,8 +244,9 @@ authenticated through akka-apps), the GraphQL WebSocket through graphql-middlewa
 mutation, the default presentation converted (bbb-web loads it from
 `https://bbb.example.com/default.pdf` through haproxy), a two-page PDF uploaded as the
 presentation uploader does and converted, and the LiveKit signaling URL. Then it runs `docker
-compose restart`, as a second cycle `docker compose restart redis`, and as a third cycle restarts
-every service while redis is stopped; after each cycle it waits until all services are healthy,
+compose restart`, as a second cycle recreates the redis container alone (with a fixed address,
+`BBB_REDIS_IP`, it keeps its address; see below), and as a third cycle restarts every service while
+redis is stopped; after each cycle it waits until all services are healthy,
 restarts nginx (see above) and repeats the join path. It prints `STEP <name>: OK|FAIL` and exits
 non-zero on failure. On a Docker host, run it directly in the directory of `docker-compose.yml`:
 `BBB_SHARED_SECRET=... docker/tests/stack/join-path.sh --domain <domain> --connect-ip ''`
