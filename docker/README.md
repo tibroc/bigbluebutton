@@ -37,6 +37,18 @@ Do not rely on bake's default file lookup: it also loads `docker-compose.yml` fr
 repository root and merges its services into the definition
 ([file lookup](https://docs.docker.com/build/bake/reference/#file-format)).
 
+The bake variable `COMMIT_DATE` is the html5 client's build identifier: `html5ClientBuild` in
+its `settings.yml` and the `?v=` cache buster of `index.html` and `fonts.css`, as upstream's
+package build sets it (`build/packages-template/bbb-html5/build.sh`). nginx, akka-apps and
+bbb-web all ship the client build's `settings.yml`, so they carry the same value. CI sets the
+commit date in upstream's form; empty (the default) gives `0`, the value of the golden tests.
+For a build that you deploy, set it, so that browsers load the new client after an upgrade:
+
+```bash
+COMMIT_DATE="$(git log -1 --format=%cd --date=format:%Y%m%dT%H%M%S)" \
+    docker buildx bake -f docker-bake.hcl $(printf -- '-f %s ' docker/bake/*.hcl) --load
+```
+
 Adding an image means adding its bake file (with `platforms`, see [CI](#ci)) and one line in
 the `default` group in `docker-bake.hcl` (bake does not merge a group defined in several files:
 the last definition wins). CI picks it up from there.
@@ -66,7 +78,7 @@ the same way, with the bake variables `BBB_IMAGE_REGISTRY` (default `localhost`)
 | `shared-notes` | `bbb-shared-notes` | `shared-notes` |
 | `web` | `bbb-web` | `bbb-web` |
 | `record-and-playback` | `bbb-record-and-playback` | not in the skeleton yet |
-| `html5-client` | `bbb-html5-client` | none: build stage of `nginx` |
+| `html5-client` | `bbb-html5-client` | none: build stage of `nginx`, `apps-akka` and `web` (its `settings.yml`) |
 | `learning-dashboard` | `bbb-learning-dashboard` | none: build stage of `nginx` |
 
 `bbb-common-message`, `bbb-common-web` and `_java-base` are build stages and get no tag.
@@ -336,6 +348,11 @@ BBB_PLATFORMS=linux/amd64,linux/arm64 \
 
 A target in the `default` group without a `bbb-<image>` tag or without platforms fails the
 workflow.
+
+**`COMMIT_DATE`** ([Building](#building)) is the commit date in `build-docker-image.yml`, so each
+published build has its own client build identifier. `docker-checks.yml` leaves it empty, as the
+golden expected trees hold `0`; only the last step of the client build depends on it, so the
+npm build still comes from the shared cache.
 
 **`docker-checks.yml`** runs on pull requests that change files below `docker/`, `*/docker/`,
 Dockerfiles, `docker-bake.hcl`, `docker-compose.yml` or the contract outputs, in parallel jobs:

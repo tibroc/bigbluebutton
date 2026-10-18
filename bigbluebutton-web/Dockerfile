@@ -81,7 +81,8 @@ COPY --chmod=0644 docker/policy.xml /etc/ImageMagick-6/policy.xml
 
 # Package files: /etc/default/bbb-web (the unit's EnvironmentFile, from bbb-web.env), the
 # blank slides and nopdfmark.ps (bbb-config), the html5 settings catalog that bbb-web reads
-# to validate client settings overrides (clientSettingsFilePath). Their directories are created
+# to validate client settings overrides (clientSettingsFilePath; the html5 client build's file,
+# as nginx and akka-apps have it). Their directories are created
 # first, traversable by any UID (docker/README.md).
 # DL3022: named build contexts (docker/bake/web.hcl), not stages.
 RUN install -d -m 0755 /etc/bigbluebutton /usr/share/bigbluebutton/blank \
@@ -93,7 +94,8 @@ COPY --from=slides --chmod=0644 blank-presentation.pdf blank-thumb.png blank-png
 # hadolint ignore=DL3022
 COPY --from=slides --chmod=0644 nopdfmark.ps /etc/bigbluebutton/nopdfmark.ps
 # hadolint ignore=DL3022
-COPY --from=html5-config --chmod=0644 settings.yml /usr/share/bigbluebutton/html5-client/private/config/settings.yml
+COPY --from=html5-client --chmod=0644 /usr/share/bigbluebutton/html5-client/private/config/settings.yml \
+     /usr/share/bigbluebutton/html5-client/private/config/settings.yml
 
 COPY --from=build /staging/ /
 
