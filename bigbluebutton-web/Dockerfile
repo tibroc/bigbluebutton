@@ -42,6 +42,23 @@ RUN gradle --no-daemon clean \
     && cp build/libs/bbb-pres-check-*.jar /staging/usr/share/prescheck/lib \
     && install -m 0755 run.sh /staging/usr/share/prescheck/prescheck.sh
 
+# JNA's native library (nuprocess, which runs the conversion tools, calls libc through JNA).
+# By default JNA unpacks it from its jar into a temporary directory (/tmp here) and loads it
+# from there, which fails where /tmp is mounted noexec (Docker's tmpfs default). The image
+# ships the library of the target architecture from the same jar instead, and the entrypoint
+# points JNA at it (jna.boot.library.path, jna.nounpack; docker/entrypoint.sh).
+ARG TARGETARCH
+RUN case "${TARGETARCH}" in \
+        amd64) jna_arch=linux-x86-64 ;; \
+        arm64) jna_arch=linux-aarch64 ;; \
+        *) echo "no JNA native library mapping for TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && set -- /staging/usr/share/bbb-web/WEB-INF/lib/jna-[0-9]*.jar \
+    && [ "$#" -eq 1 ] && [ -f "$1" ] \
+    && install -d -m 0755 /staging/usr/local/lib/bbb/bbb-web/jna \
+    && unzip -j -q "$1" "com/sun/jna/${jna_arch}/libjnidispatch.so" -d /staging/usr/local/lib/bbb/bbb-web/jna \
+    && chmod 0644 /staging/usr/local/lib/bbb/bbb-web/jna/libjnidispatch.so
+
 # 2. Runtime stage: the shared Java base (Ubuntu 24.04, OpenJDK 21 JRE, entrypoint helper)
 #    with the tools bbb-web runs for presentation conversion (bbb-common-web: convert and
 #    identify, gs, pdfinfo, pdffonts, pdftocairo, pdftoppm, pdftotext) and the fonts of the

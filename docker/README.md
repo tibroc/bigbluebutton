@@ -153,6 +153,20 @@ with a message naming a missing or malformed variable.
   `docker compose restart` and after an upstream restarted by itself: Docker Engine 29 gives
   restarted containers other addresses, and `docker compose restart` restarts all services at
   once, in no particular order. Restart nginx once the others are healthy.
+- **redis has a fixed address** in the `bbb` network (`BBB_REDIS_IP`, default `172.30.82.21`; it
+  must lie inside `BBB_NETWORK_SUBNET`), as bare metal's redis is always at 127.0.0.1. akka-apps
+  and bbb-web keep the address they resolved for `redis` for the TTL of Docker's DNS answers
+  (600 s) and reconnect to it; Docker gives a restarted or recreated container a new address
+  unless it is fixed, and the two would not reach redis until that time had passed.
+- **The server's own name.** Inside the stack, `BBB_DOMAIN` resolves to haproxy (a network
+  alias), as the server's name resolves to the server itself on bare metal. bbb-web loads the
+  default presentation from `https://BBB_DOMAIN/default.pdf` at every create, so this works
+  without public DNS and behind NAT without hairpin routing. bbb-web verifies the certificate:
+  meetings created while haproxy still serves its temporary self-signed certificate (before
+  certbot's first certificate) start without the default presentation. URLs on `BBB_DOMAIN`
+  are allowed for bbb-web's URL fetches (`fetchUrlAllowedLocalHosts`), as on bare metal, where
+  the name resolves to a public address; a Tier 3 `bbb-web.properties` that sets this key
+  replaces that list.
 - **Ports.** Only nginx 80/tcp, haproxy 443/tcp, livekit 7882/udp and coturn 3478/udp+tcp are
   published. haproxy and nginx run as non-root users and bind 443, 80 and 81 through the
   per-container sysctl `net.ipv4.ip_unprivileged_port_start=0`. Published ports bypass ufw and
@@ -203,22 +217,27 @@ docker/tests/buildkit/build.sh --tag 4.0.1 graphql-server        # then apps-akk
                                                                  # shared-notes, bbb-webrtc-sfu, nginx
 docker/tests/stack/dind.sh start     # Docker Engine in a privileged podman container
 docker/tests/stack/dind.sh load      # copies the images of docker-compose.yml from podman
-docker/tests/stack/dind.sh up        # docker compose up -d --wait, certbot scaled to 0
-docker/tests/stack/dind.sh test      # join-path.sh, including two restart cycles
+docker/tests/stack/dind.sh up        # test certificate, docker compose up -d --wait, no certbot
+docker/tests/stack/dind.sh test      # join-path.sh, including three restart cycles
 docker/tests/stack/dind.sh compose logs akka-apps   # any docker compose command
 docker/tests/stack/dind.sh stop      # removes the Engine container and all its data
 ```
 
-The stack runs with `docker/tests/stack/fixture.env` (fixture values, `bbb.example.com`, the
-self-signed certificate; certbot is scaled to 0, so no ACME request is made). Its ports are
-published inside the Engine container only. `join-path.sh` does what the html5 client does when
-a user joins: API create and join, the redirect to the client with the session token,
-`/api/rest/meetingStaticData` (Hasura, authenticated through akka-apps), the GraphQL WebSocket
-through graphql-middleware up to the first subscription, and the LiveKit signaling URL. Then it
-runs `docker compose restart` and, as a second cycle, restarts every service while redis is
-stopped; after each cycle it waits until all services are healthy, restarts nginx (see above) and
-repeats the join path. It prints `STEP <name>: OK|FAIL` and exits non-zero on failure. On a
-Docker host, run it directly in the directory of `docker-compose.yml`:
+The stack runs with `docker/tests/stack/fixture.env` (fixture values, `bbb.example.com`;
+certbot is scaled to 0, so no ACME request is made). In its place, `up` issues a certificate for
+`bbb.example.com` from a throwaway test CA and puts it into the `certs` volume as certbot would;
+`docker/tests/stack/compose.test.yml` makes bbb-web trust that CA, as a deployment's JVM trusts
+the CA of its certificate. Its ports are published inside the Engine container only.
+`join-path.sh` does what the html5 client does when a user joins: API create and join, the
+redirect to the client with the session token, `/api/rest/meetingStaticData` (Hasura,
+authenticated through akka-apps), the GraphQL WebSocket through graphql-middleware, the join
+mutation, the default presentation converted (bbb-web loads it from
+`https://bbb.example.com/default.pdf` through haproxy), a two-page PDF uploaded as the
+presentation uploader does and converted, and the LiveKit signaling URL. Then it runs `docker
+compose restart`, as a second cycle `docker compose restart redis`, and as a third cycle restarts
+every service while redis is stopped; after each cycle it waits until all services are healthy,
+restarts nginx (see above) and repeats the join path. It prints `STEP <name>: OK|FAIL` and exits
+non-zero on failure. On a Docker host, run it directly in the directory of `docker-compose.yml`:
 `BBB_SHARED_SECRET=... docker/tests/stack/join-path.sh --domain <domain> --connect-ip ''`
 (add `--insecure` for a self-signed certificate; `--help` lists the options).
 

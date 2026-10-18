@@ -18,5 +18,8 @@ allowed:
     line: '^redisHost=(127\.0\.0\.1|redis)$'
     reason: "compose.md Service names: redis is its own service on the bbb network, not on localhost"
   - file: usr/share/bbb-web/WEB-INF/classes/bigbluebutton.properties
+    line: '^fetchUrlAllowedLocalHosts=(bbb\.example\.com)?$'
+    reason: "docker-compose.yml haproxy network alias: inside the stack BBB_DOMAIN resolves to the TLS edge's private address, which bbb-web's URL fetch checks reject unless the host is listed; bare metal resolves it to the server's public address"
+  - file: usr/share/bbb-web/WEB-INF/classes/bigbluebutton.properties
     line: '^disableRecordingDefault=(false|true)$'
     reason: "contract features.recording: disableRecordingDefault=true without the recording feature (the reference has recording installed)"
