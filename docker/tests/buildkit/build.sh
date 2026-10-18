@@ -10,6 +10,8 @@
 #   --tag TAG   tag of the loaded images (bake variable BBB_IMAGE_TAG, default `buildkit`):
 #               localhost/bbb-<image>:TAG. Targets without tags (build stages) load untagged.
 #   TARGET      bake targets, as in `docker buildx bake` (docker/README.md, "Building").
+#   COMMIT_DATE (environment) is passed to bake: the html5 client's build identifier
+#               (empty: `0`, as in docker-checks.yml).
 #
 # How: a BuildKit daemon runs in a podman container (BUILDKITD_NAME, default bbb-buildkitd,
 # started if it is not running; its cache is the volume BUILDKITD_NAME-state). The docker CLI
@@ -83,7 +85,7 @@ for t in "$@"; do sets+=(--set "$t.output=type=docker,dest=/out/$t.tar"); done
 rc=0
 podman run --rm --network "container:$NAME" --security-opt label=disable \
     -v "$REPO:/src:ro" -v "$out:/out" -w /src \
-    -e BBB_IMAGE_TAG="$tag" -e BUILDX_GIT_INFO=false \
+    -e BBB_IMAGE_TAG="$tag" -e COMMIT_DATE="${COMMIT_DATE:-}" -e BUILDX_GIT_INFO=false \
     "$DOCKER_CLI_IMAGE" sh -euc '
         docker buildx create --name bbb-buildkitd --driver remote tcp://127.0.0.1:1234 --use >/dev/null
         exec docker buildx bake --allow fs.write=/out --progress plain --provenance false "$@"

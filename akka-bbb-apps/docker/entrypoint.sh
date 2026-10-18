@@ -73,16 +73,16 @@ if ! bbb_is_render_only && [ "$(basename -- "$1")" = bbb-apps-akka ]; then
     if address="$(java -Xshare:auto -XX:TieredStopAtLevel=1 -Xmx64m \
             -cp "/usr/local/lib/bbb/akka-apps:$APP_HOME/lib/*" \
             -Dconfig.file="$config_file" RedisAddress 2>/dev/null)" \
-        && read -r REDIS_HOST REDIS_PORT <<<"$address" && [ -n "$REDIS_HOST" ] \
-        && [[ "$REDIS_PORT" =~ ^[0-9]+$ ]]; then
+        && read -r redis_host redis_port <<<"$address" && [ -n "$redis_host" ] \
+        && [[ "$redis_port" =~ ^[0-9]+$ ]]; then
         # bash as PID 1 ignores SIGTERM without a handler; stop waiting when the container stops.
         trap 'exit 143' TERM
         deadline=$((SECONDS + REDIS_WAIT_SECONDS))
         # shellcheck disable=SC2016  # expanded by the inner bash
-        until timeout 2 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$REDIS_HOST" "$REDIS_PORT" 2>/dev/null; do
+        until timeout 2 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$redis_host" "$redis_port" 2>/dev/null; do
             [ "$SECONDS" -lt "$deadline" ] \
-                || bbb_die "redis ($REDIS_HOST:$REDIS_PORT) not reachable after ${REDIS_WAIT_SECONDS}s"
-            [ -n "${waiting:-}" ] || { bbb_log "waiting for redis ($REDIS_HOST:$REDIS_PORT)"; waiting=1; }
+                || bbb_die "redis ($redis_host:$redis_port) not reachable after ${REDIS_WAIT_SECONDS}s"
+            [ -n "${waiting:-}" ] || { bbb_log "waiting for redis ($redis_host:$redis_port)"; waiting=1; }
             sleep 1
         done
         trap - TERM
