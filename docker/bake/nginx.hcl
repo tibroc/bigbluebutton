@@ -10,7 +10,7 @@ target "nginx" {
         html5-client = "target:html5-client"
         packages = "./build/packages-template"
         bigbluebutton-web = "./bigbluebutton-web"
-        learning-dashboard = "./bbb-learning-dashboard"
+        learning-dashboard = "target:learning-dashboard"
         rap-presentation = "./record-and-playback/presentation/scripts"
         bigbluebutton-config = "./bigbluebutton-config"
     }
