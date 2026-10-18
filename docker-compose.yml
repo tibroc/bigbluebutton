@@ -5,7 +5,7 @@
 #
 #   docker compose up -d
 #
-# Not in the skeleton yet: recording, learning dashboard data, office conversion, webhooks,
+# Optional (BBB_FEATURES/profiles): webhooks. Not in the stack yet: recording, office conversion,
 # greenlight, monitoring, setup and preflight. See docker/README.md.
 
 name: bigbluebutton
@@ -109,6 +109,10 @@ services:
         condition: service_healthy
       bbb-webrtc-sfu:
         condition: service_healthy
+      # Only with the webhooks feature (profile); nginx then proxies /bigbluebutton/api/hooks to it.
+      webhooks:
+        condition: service_healthy
+        required: false
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "--haproxy-protocol", "http://127.0.0.1:81/bigbluebutton/rtt-check"]
       interval: 30s
