@@ -73,8 +73,8 @@ services:
       retries: 3
 
   # Web server: landing page, ACME webroot and the routes to the services (API, websockets, the
-  # html5 client and the learning dashboard). nginx resolves the upstream service names once, at
-  # start: restart it after an upstream container was recreated (docker/README.md).
+  # html5 client and the learning dashboard). nginx re-resolves the upstream service names
+  # (docker/nginx/bbb-upstreams.conf), so a recreated upstream is followed without a restart.
   nginx:
     image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-nginx:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
