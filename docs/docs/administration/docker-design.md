@@ -62,7 +62,8 @@ them together. Each section below states a decision and the reason for it. The d
 | `conversion` | `collabora/code` | used as it is |
 | `webhooks` | `ghcr.io/bigbluebutton/bbb-webhooks` | used as it is (profile `webhooks`) |
 
-The `bbb-` images are published as `ghcr.io/bigbluebutton/bbb-<image>`. Components whose code
+The `bbb-` images are published as `ghcr.io/bigbluebutton/bigbluebutton/bbb-<image>` (the
+repository's own namespace, so they never collide with the images of the component repositories). Components whose code
 lives in another repository and which publish their own image run from that image, pinned by
 tag and digest to the version BigBlueButton pins (`<component>.placeholder.sh`): bbb-webhooks
 unchanged, configured in the compose file through node-config; bbb-webrtc-sfu with one added
@@ -89,8 +90,9 @@ and made those settings impossible to change there. Both upstream images keep th
 - **Multi-stage builds.** Compilers and build tools stay in build stages; runtime images get
   only what the service runs.
 - **Non-root.** Every image built here runs as a numeric non-root user and under any UID/GID
-  (`docker/tests/uid/check.sh`), except `setup`, which runs as root with two capabilities to give
-  `.env` the owner of the directory. Services that write the shared data volume run as
+  (`docker/tests/uid/check.sh`), with two exceptions: `setup` runs as root with two capabilities
+  to give `.env` the owner of the directory, and `postgres` runs as the official image's
+  `postgres` user (999), because PostgreSQL only starts on a data directory owned by its user. Services that write the shared data volume run as
   `BBB_UID:BBB_GID` (default `998`), so files keep one owner, as with the `bigbluebutton` user on
   bare metal, and existing trees or NFS exports keep working.
 - **Read-only root filesystems.** Every service runs with `read_only: true` and writes only to its
