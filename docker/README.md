@@ -146,6 +146,9 @@ in `docker/.hadolint.yaml`.
 
 ## Running the stack
 
+Operators: installing, upgrading, backing up and restoring the stack is described in
+[`docs/docs/administration/docker.md`](../docs/docs/administration/docker.md).
+
 `docker-compose.yml` at the repository root is the only compose file. It is static: settings
 come from `.env` (template: `.env.sample`, generated from `docker/config-contract.yaml`) and
 each service receives only the variables it reads. The images validate them at start and exit
