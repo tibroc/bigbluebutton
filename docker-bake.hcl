@@ -75,5 +75,6 @@ group "default" {
         "bbb-webrtc-sfu",
         "certbot",
         "webhooks",
+        "setup",
     ]
 }
