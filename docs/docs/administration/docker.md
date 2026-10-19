@@ -45,7 +45,7 @@ The stack publishes only these ports. Open them in your firewall or security gro
 |---|---|---|
 | 80/tcp | nginx | Let's Encrypt HTTP-01 challenge, redirect to HTTPS |
 | 443/tcp | haproxy | HTTPS, WebSocket signaling, TURN over TLS |
-| 7882/udp | livekit | all WebRTC media (one UDP port) |
+| 7882/udp | livekit | all WebRTC media (one UDP port; `LIVEKIT_RTC_UDP_PORT`) |
 | 3478/udp, 3478/tcp | coturn | TURN |
 
 No UDP port range is needed. The TURN relay ports stay inside the Docker network.
@@ -106,7 +106,7 @@ openssl rand -hex 32
 `LIVEKIT_API_KEY` takes 8 to 64 letters and digits (`openssl rand -hex 8`). Every variable, its
 format and its default is listed in the
 [Container Configuration Reference](/administration/docker-configuration). Keep `.env`
-readable only by root: it holds all secrets of the server.
+readable only by its owner (`chmod 600 .env`): it holds all secrets of the server.
 
 `BBB_FEATURES` selects optional features. Today the stack has `webhooks` (bbb-webhooks). With
 `recording`, the default of `.env.sample`, bbb-web offers the record button, but no recordings
@@ -153,8 +153,10 @@ haproxy switches to it by itself. certbot renews it automatically.
 
 ### 5. Check the API
 
-The repository contains an API smoke test. It reads the shared secret from the environment
-only, so type it in instead of putting it on the command line:
+The repository contains an API smoke test. It verifies the TLS certificate, so run it once
+`certbot` has obtained the real certificate (`docker compose logs certbot`), or add `--insecure`
+before that. It reads the shared secret from the environment only, so type it in instead of
+putting it on the command line:
 
 ```bash
 read -rs BBB_SHARED_SECRET && export BBB_SHARED_SECRET
@@ -195,7 +197,9 @@ docker compose pull
 docker compose up -d
 ```
 
-If you set `BBB_IMAGE_TAG` in `.env`, change it to the new version as well.
+If you set `BBB_IMAGE_TAG` in `.env`, change it to the new version as well. If you build the
+images yourself (`BBB_IMAGE_REGISTRY=localhost`), rebuild them with `docker buildx bake` instead
+of `docker compose pull`.
 
 What to expect:
 
@@ -229,14 +233,16 @@ PostgreSQL is stopped, and a stopped stack also writes nothing to `bbb-data`. An
 their shared notes, which `db-init` recreates on the next upgrade anyway. Meetings in progress
 end.
 
+Keep the backup outside the repository checkout: it contains `.env` with all secrets.
+
 ```bash
-mkdir -p backup
+mkdir -p ../bbb-backup
 docker compose stop
 for v in bbb-data postgres-data letsencrypt; do
-  docker run --rm -v bigbluebutton_$v:/volume:ro -v "$PWD/backup":/backup ubuntu:24.04 \
+  docker run --rm -v bigbluebutton_$v:/volume:ro -v "$PWD/../bbb-backup":/backup ubuntu:24.04 \
     tar -C /volume --numeric-owner -czf /backup/$v.tar.gz .
 done
-install -m 600 .env backup/env
+install -m 600 .env ../bbb-backup/env
 docker compose up -d
 ```
 
@@ -245,10 +251,10 @@ docker compose up -d
 On the new server, check out the same release as on the old one, then:
 
 ```bash
-install -m 600 backup/env .env
+install -m 600 ../bbb-backup/env .env
 docker compose create
 for v in bbb-data postgres-data letsencrypt; do
-  docker run --rm -v bigbluebutton_$v:/volume -v "$PWD/backup":/backup:ro ubuntu:24.04 \
+  docker run --rm -v bigbluebutton_$v:/volume -v "$PWD/../bbb-backup":/backup:ro ubuntu:24.04 \
     tar -C /volume --numeric-owner -xzpf /backup/$v.tar.gz
 done
 docker compose up -d
