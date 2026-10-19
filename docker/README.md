@@ -167,16 +167,22 @@ with a message naming a missing or malformed variable.
   from the environment and cannot be changed there, nor can Bearer auth be turned off there
   while `WEBHOOKS_BEARER_AUTH=true`.
 - **nginx follows restarted services.** The services nginx proxies to (bbb-web, shared-notes,
-  graphql-server, graphql-middleware, livekit, bbb-webrtc-sfu, html5, learning-dashboard,
-  webhooks) are upstream groups with `server <service>:<port> resolve` in
-  `/etc/nginx/conf.d/bbb-upstreams.conf`, resolved through Docker's embedded DNS server
-  (`127.0.0.11`) every 10 seconds. A service that was restarted or recreated with a new address
-  is reached again without restarting nginx, and nginx starts even when a service is missing
-  (an optional one, or one that crashed): its locations answer 502 until it is back, and nginx
-  logs `<service> could not be resolved` about every 15 seconds meanwhile (also for `webhooks`
-  while the webhooks feature is off). nginx still waits for its upstreams to be healthy on
-  `docker compose up` (`depends_on`), so a fresh start answers no 502s. On Kubernetes, mount a file at that path that names the cluster DNS server
-  (`resolver` with the address of kube-dns) and the Service names instead.
+  graphql-server, graphql-middleware, livekit, bbb-webrtc-sfu, html5, learning-dashboard) are
+  upstream groups with `server <service>:<port> resolve` in `/etc/nginx/conf.d/bbb-upstreams.conf`,
+  resolved through Docker's embedded DNS server (`127.0.0.11`) every 10 seconds. The group of an
+  optional feature comes with its locations: with `webhooks` in `BBB_FEATURES`, the entrypoint
+  writes the webhooks group (`/usr/local/share/bbb/nginx/upstreams/webhooks.conf`) to
+  `/etc/nginx/sites-available/bbb-feature-upstreams`, which `sites-enabled/` includes at http
+  level; otherwise that file holds only a comment. A service that was restarted or recreated
+  with a new address is reached again without restarting nginx, and nginx starts even when a
+  service is missing (one that crashed, or webhooks while its feature is on but it is stopped):
+  its locations answer 502 until it is back, and nginx logs `<service> could not be resolved`
+  about every 15 seconds meanwhile. nginx still waits for its upstreams to be healthy on `docker
+  compose up` (`depends_on`), so a fresh start answers no 502s. On Kubernetes, replace both
+  `/etc/nginx/conf.d/bbb-upstreams.conf` and `/usr/local/share/bbb/nginx/upstreams/webhooks.conf`
+  with mounted files that name the cluster DNS server (`resolver` with the address of kube-dns)
+  and the Services by their fully qualified names (`bbb-web.<namespace>.svc.cluster.local`):
+  nginx's resolver does not use the DNS search domains, so short names do not resolve there.
 - **redis has a fixed address** in the `bbb` network (`BBB_REDIS_IP`, default `172.30.82.21`; it
   must lie inside `BBB_NETWORK_SUBNET`), as bare metal's redis is always at 127.0.0.1. akka-apps
   and bbb-web keep the address they resolved for `redis` for the TTL of Docker's DNS answers

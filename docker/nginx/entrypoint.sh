@@ -26,6 +26,12 @@ declare -A FEATURE_FRAGMENTS=(
     [recording]="playback.nginx presentation.nginx"
     [webhooks]="webhooks.nginx"
 )
+# Upstream groups per feature (/usr/local/share/bbb/nginx/upstreams/), written with the
+# fragments that proxy to them: a group of a service that does not run would make nginx log a
+# resolver error every few seconds.
+declare -A FEATURE_UPSTREAMS=(
+    [webhooks]="webhooks.conf"
+)
 
 # 1. validate (patterns from docker/config-contract.yaml). Unset BBB_FEATURES means the
 # default; set but empty means no optional feature.
@@ -37,9 +43,16 @@ bbb_require_match BBB_NETWORK_SUBNET '((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9
 # 2. derive
 fragments=("${ALWAYS_FRAGMENTS[@]}")
 stale=()
+upstreams=()
 for feature in recording webhooks; do
     read -r -a names <<<"${FEATURE_FRAGMENTS[$feature]}"
-    if bbb_feature_enabled "$feature"; then fragments+=("${names[@]}"); else stale+=("${names[@]}"); fi
+    read -r -a groups <<<"${FEATURE_UPSTREAMS[$feature]:-}"
+    if bbb_feature_enabled "$feature"; then
+        fragments+=("${names[@]}")
+        upstreams+=("${groups[@]}")
+    else
+        stale+=("${names[@]}")
+    fi
 done
 
 # 3. render
@@ -60,6 +73,14 @@ for name in "${stale[@]}"; do
     dest="$(bbb_path "$FRAGMENT_DIR/$name")"
     rm -f -- "$dest"
 done
+# The upstream groups of the enabled features, included at http level through the image's
+# symlink sites-enabled/bbb-feature-upstreams. Always written: a dangling symlink there would
+# stop nginx.
+dest="$(bbb_path /etc/nginx/sites-available/bbb-feature-upstreams)"
+{
+    echo "# Upstream groups of the enabled optional features (BBB_FEATURES=${BBB_FEATURES}); written by the entrypoint."
+    for name in "${upstreams[@]}"; do cat -- "$SRC/upstreams/$name"; done
+} >"$dest"
 # bbb-web installs its fragment as `web` and links web.nginx to it (after-install.sh).
 dest="$(bbb_path "$FRAGMENT_DIR/web.nginx")"
 ln -sfn "$FRAGMENT_DIR/web" "$dest"
@@ -72,9 +93,11 @@ if bbb_is_render_only; then
         dest="$(bbb_path "$file")"
         bbb_render "$file" "$dest"
     done
-    dest="$(bbb_path /etc/nginx/sites-enabled/bigbluebutton)"
-    mkdir -p -- "$(dirname -- "$dest")"
-    ln -sfn /etc/nginx/sites-available/bigbluebutton "$dest"
+    for name in bigbluebutton bbb-feature-upstreams; do
+        dest="$(bbb_path "/etc/nginx/sites-enabled/$name")"
+        mkdir -p -- "$(dirname -- "$dest")"
+        ln -sfn "/etc/nginx/sites-available/$name" "$dest"
+    done
 fi
 
 # 5. exec

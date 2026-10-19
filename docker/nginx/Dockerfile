@@ -26,7 +26,8 @@ USER 0
 # directories of the files copied below, traversable by any UID (docker/README.md).
 RUN apk add --no-cache bash gettext-envsubst \
     && rm -f /etc/nginx/conf.d/default.conf \
-    && install -d -m 0755 /usr/local/share/bbb/nginx/fragments /usr/share/bigbluebutton \
+    && install -d -m 0755 /usr/local/share/bbb/nginx/fragments /usr/local/share/bbb/nginx/upstreams \
+        /usr/share/bigbluebutton \
         /usr/local/lib/bbb
 
 # Location fragments, under the names the packages install them with (the build.sh of each
@@ -57,8 +58,11 @@ COPY --from=rap-presentation --chmod=0644 presentation.nginx /usr/local/share/bb
 COPY --chmod=0644 default-fe.nginx bbb-html5.nginx.static /usr/local/share/bbb/nginx/fragments/
 
 # The upstream groups of the services, one per compose service name, re-resolved at run time
-# (bbb-upstreams.conf). Kubernetes mounts its own file here.
+# (bbb-upstreams.conf). Kubernetes mounts its own file here. The group of an optional feature
+# comes with its location fragment: the entrypoint writes it to
+# sites-enabled/bbb-feature-upstreams only when the feature is enabled.
 COPY --chmod=0644 bbb-upstreams.conf /etc/nginx/conf.d/bbb-upstreams.conf
+COPY --chmod=0644 webhooks.upstream.conf /usr/local/share/bbb/nginx/upstreams/webhooks.conf
 
 # Containers: the services are reached through those upstream groups instead of 127.0.0.1:<port>
 # (docs: compose.md "Service names"); `proxy_pass http://<group>` keeps the rest of each URI as
@@ -94,10 +98,11 @@ RUN sed -i 's|http://127\.0\.0\.1:8090|http://bbb-web|g' web bbb-shared-notes-se
     && if grep -nE '^[[:space:]]*proxy_pass[[:space:]]+https?://(127\.0\.0\.1|localhost)[:/]' ./*; then \
          echo "local upstream left in a fragment" >&2; exit 1; \
        fi \
-    && sed -n 's/^upstream \([a-z0-9-]*\) {$/\1/p' /etc/nginx/conf.d/bbb-upstreams.conf >/tmp/groups \
+    && sed -n 's/^upstream \([a-z0-9-]*\) {$/\1/p' /etc/nginx/conf.d/bbb-upstreams.conf \
+         /usr/local/share/bbb/nginx/upstreams/*.conf >/tmp/groups \
     && sed -nE 's|^[[:space:]]*proxy_pass[[:space:]]+http://([^/;$]*).*|\1|p' ./* >/tmp/hosts \
     && if grep -vxF -f /tmp/groups /tmp/hosts; then \
-         echo "proxy_pass to a host that is not an upstream group of bbb-upstreams.conf" >&2; exit 1; \
+         echo "proxy_pass to a host that is not an upstream group of the image" >&2; exit 1; \
        fi \
     && rm /tmp/groups /tmp/hosts
 WORKDIR /
@@ -128,6 +133,7 @@ RUN ln -s /usr/share/nginx/html /etc/nginx/html \
     && install -d -m 1777 /etc/nginx/sites-available /usr/share/bigbluebutton/nginx \
         /var/www/bigbluebutton-default/assets/.well-known/acme-challenge /var/bigbluebutton \
     && ln -s /etc/nginx/sites-available/bigbluebutton /etc/nginx/sites-enabled/bigbluebutton \
+    && ln -s /etc/nginx/sites-available/bbb-feature-upstreams /etc/nginx/sites-enabled/bbb-feature-upstreams \
     && ln -s /dev/stdout /var/log/nginx/bigbluebutton.access.log
 
 # Shared entrypoint helper (P3).
