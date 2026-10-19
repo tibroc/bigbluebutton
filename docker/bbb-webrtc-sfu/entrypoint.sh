@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Entrypoint of the bbb-webrtc-sfu image. The SFU reads its configuration with node-config
-# from NODE_CONFIG_DIR, as the bare-metal unit sets it
-# (build/packages-template/bbb-webrtc-sfu/bbb-webrtc-sfu.service): the image's base
-# config/default.yml (written at build time by configure.sh), then the Tier 3 override
+# from NODE_CONFIG_DIR (Dockerfile): upstream's /app/config/production.yml, the package's
+# changes /usr/local/share/bbb/bbb-webrtc-sfu/production.yml, the Tier 3 override
 # /etc/bigbluebutton/bbb-webrtc-sfu/production.yml if mounted, then environment variables.
 # This entrypoint only validates and exports those variables; it renders nothing.
 set -euo pipefail          # never set -x: xtrace prints every value, secrets included
@@ -31,10 +30,10 @@ export LIVEKIT_SECRET="$LIVEKIT_API_SECRET"
 export LIVEKIT_BBB_DOMAIN="$BBB_DOMAIN"
 unset LIVEKIT_API_SECRET
 
-# 3. render: nothing at start. In render-only mode, write out the base config the SFU reads,
-# for the golden-file and parity tests.
+# 3. render: nothing at start. In render-only mode, write out the image's changes to
+# upstream's configuration, for the golden-file test.
 if bbb_is_render_only; then
-    base=/usr/local/bigbluebutton/bbb-webrtc-sfu/config/default.yml
+    base=/usr/local/share/bbb/bbb-webrtc-sfu/production.yml
     dest="$(bbb_path "$base")"
     mkdir -p "$(dirname "$dest")"
     cp "$base" "$dest"
