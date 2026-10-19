@@ -18,7 +18,7 @@
 #   --docker CMD             docker CLI to use (default `docker`)
 #   --network NAME           the stack's `bbb` network (default bigbluebutton_bbb)
 #   --image IMG              image with Node 24 for receiver and client (default
-#                            localhost/bbb-webhooks:4.0.1)
+#                            localhost/bbb-graphql-actions:4.0.1)
 #
 # The receiver and the client run on the `bbb` network, where BBB_DOMAIN resolves to haproxy;
 # the client does not verify the certificate (test CA). The shared secret goes to the client on
@@ -37,7 +37,7 @@ expect="meeting-created,meeting-ended"
 domain=bbb.example.com
 docker_cmd=docker
 network=bigbluebutton_bbb
-image=localhost/bbb-webhooks:4.0.1
+image=localhost/bbb-graphql-actions:4.0.1
 while [ $# -gt 0 ]; do
     case "$1" in
         --auth) [ $# -ge 2 ] || usage; auth="$2"; shift 2 ;;

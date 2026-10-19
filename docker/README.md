@@ -77,7 +77,6 @@ the same way, with the bake variables `BBB_IMAGE_REGISTRY` (default `localhost`)
 | `postgres` | `bbb-postgres` | `postgres` |
 | `shared-notes` | `bbb-shared-notes` | `shared-notes` |
 | `web` | `bbb-web` | `bbb-web` |
-| `webhooks` | `bbb-webhooks` | `webhooks` (profile `webhooks`) |
 | `setup` | `bbb-setup` | `setup` (profile `setup`, run-only: `docker compose run --rm setup`) |
 | `record-and-playback` | `bbb-record-and-playback` | not in the skeleton yet |
 | `html5-client` | `bbb-html5-client` | `html5` (also a build stage of `apps-akka` and `web`: its `settings.yml`) |
@@ -85,6 +84,23 @@ the same way, with the bake variables `BBB_IMAGE_REGISTRY` (default `localhost`)
 
 `bbb-common-message`, `bbb-common-web` and `_java-base` are build stages and get no tag.
 Third-party images (redis) are pinned by tag and digest in `docker-compose.yml`.
+
+**Upstream's images.** A component whose code lives outside this repository and whose own
+repository publishes an image runs from that image, pinned by tag and digest in
+`docker-compose.yml` to the version BigBlueButton pins (`<component>.placeholder.sh`; the
+image's `org.opencontainers.image.revision` label is that commit):
+
+- **webhooks** runs `ghcr.io/bigbluebutton/bbb-webhooks` unchanged, configured in
+  `docker-compose.yml` only, through node-config: the environment variables of its
+  `config/custom-environment-variables.yml` and `NODE_CONFIG`, JSON that node-config merges
+  over the configuration files ([node-config: Environment Variables](https://github.com/node-config/node-config/wiki/Environment-Variables#node_config)).
+- **bbb-webrtc-sfu** is a thin layer over `ghcr.io/bigbluebutton/bbb-webrtc-sfu`
+  (`docker/bbb-webrtc-sfu/`): the bare-metal package's changes to upstream's configuration as
+  one file between upstream's configuration and the Tier 3 override, the entrypoint (validation)
+  and a healthcheck. `NODE_CONFIG` would not do: it is merged after every file, so a Tier 3
+  `production.yml` could no longer change those settings.
+
+Both upstream images are published for amd64 and arm64.
 
 To run the stack on local builds:
 
@@ -187,10 +203,14 @@ with a message naming a missing or malformed variable.
   `webhooks`: `.env` derives `COMPOSE_PROFILES` from it, which starts the service, and nginx
   then proxies `/bigbluebutton/api/hooks` to it. `WEBHOOKS_BEARER_AUTH` (default `true`) selects
   how callbacks are authenticated: the shared secret as a Bearer token, or (`false`) a checksum
-  in the callback URL. A Tier 3 `/etc/bigbluebutton/bbb-webhooks/production.yml` is merged over
-  the image's configuration; the shared secret, the domain, redis and the listen address come
-  from the environment and cannot be changed there, nor can Bearer auth be turned off there
-  while `WEBHOOKS_BEARER_AUTH=true`.
+  in the callback URL. It must be exactly `true` or `false`: compose writes it into
+  `NODE_CONFIG` as a JSON boolean, and with any other value node-config reports the malformed
+  JSON and ignores all of `NODE_CONFIG` (`docker compose run --rm setup` validates it). A Tier 3
+  `/etc/bigbluebutton/bbb-webhooks/production.yml` is merged over the image's configuration;
+  the shared secret, the domain, redis, the listen address and Bearer auth come from the
+  environment and `NODE_CONFIG` and cannot be changed there. Upstream's image does not check
+  the values: bbb-web and akka-apps reject a malformed `BBB_DOMAIN` or `BBB_SHARED_SECRET` at
+  start.
 - **Office documents** (Word, PowerPoint, Excel, OpenDocument and the other formats LibreOffice
   reads) are converted to PDF by the `conversion` service, for bbb-web's presentation upload.
   On bare metal, bbb-web runs LibreOffice in a new `docker run --network none bbb-soffice`
@@ -321,12 +341,15 @@ docker/tests/buildkit/build.sh --tag 4.0.1 haproxy certbot coturn livekit
 docker/tests/buildkit/build.sh --tag 4.0.1 postgres db-init graphql-middleware graphql-actions
 docker/tests/buildkit/build.sh --tag 4.0.1 graphql-server        # then apps-akka, web,
                                                                  # shared-notes, bbb-webrtc-sfu, nginx,
+                                                                 # (webhooks: upstream's image, pulled)
                                                                  # html5-client, learning-dashboard
 docker/tests/stack/dind.sh start     # Docker Engine in a privileged podman container
 docker/tests/stack/dind.sh load      # copies the images of docker-compose.yml from podman
 docker/tests/stack/dind.sh up        # test certificate, docker compose up -d --wait, no certbot
 docker/tests/stack/dind.sh test      # join-path.sh, including three restart cycles
 docker/tests/stack/dind.sh conversion   # conversion-check.sh against the stack's conversion service
+docker/tests/stack/dind.sh config    # effective configuration of bbb-webrtc-sfu and webhooks
+docker/tests/stack/dind.sh webhooks run --auth bearer   # callbacks of a registered hook
 docker/tests/stack/dind.sh compose logs akka-apps   # any docker compose command
 docker/tests/stack/dind.sh stop      # removes the Engine container and all its data
 ```
@@ -355,6 +378,12 @@ services are healthy and repeats the join path, without restarting nginx (see ab
 `STEP <name>: OK|FAIL` and exits non-zero on failure. On a Docker host, run it directly in the directory of `docker-compose.yml`:
 `BBB_SHARED_SECRET=... docker/tests/stack/join-path.sh --domain <domain> --connect-ip ''`
 (add `--insecure` for a self-signed certificate; `--help` lists the options).
+
+`config-check.sh` (`dind.sh config`) prints and checks what node-config merged in the running
+bbb-webrtc-sfu and webhooks containers (`node -e` in each): the package's settings, the adapter
+list without FreeSWITCH, the webhook receiver, Bearer auth as `--bearer-auth` says, and that
+the secrets come from the environment (compared there, never printed). For webhooks, which has
+no image of ours and so no golden-file case, it is the configuration test.
 
 `docker/tests/stack/notes-pdf-check.sh` checks the PDF converter of the shared-notes image on
 its own: like the bare-metal unit (`PrivateNetwork=true`, `IPAddressDeny=any`), wkhtmltopdf runs
@@ -446,9 +475,8 @@ a `dev-` prefix), `sha-<short sha>` and, for release tags, `<version>`, `<major>
 
 **Platforms** are set per image in `docker/bake/<image>.hcl`. An image that builds only for
 amd64 sets `platforms = ["linux/amd64"]` with the reason in a comment (today graphql-server,
-graphql-middleware, livekit, bbb-webrtc-sfu, shared-notes, export-annotations and
-record-and-playback); every other
-image sets `platforms = compact(split(",", BBB_PLATFORMS))`. The bake variable `BBB_PLATFORMS`
+graphql-middleware, livekit, shared-notes, export-annotations and record-and-playback); every
+other image sets `platforms = compact(split(",", BBB_PLATFORMS))`. The bake variable `BBB_PLATFORMS`
 is empty by default, so local builds are for the host's platform; CI sets it to
 `linux/amd64,linux/arm64` to read the list:
 
