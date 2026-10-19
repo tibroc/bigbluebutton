@@ -100,7 +100,11 @@ image's `org.opencontainers.image.revision` label is that commit):
   and a healthcheck. `NODE_CONFIG` would not do: it is merged after every file, so a Tier 3
   `production.yml` could no longer change those settings.
 
-Both upstream images are published for amd64 and arm64.
+Both upstream images are published for amd64 and arm64. They keep upstream's Node version,
+Node 22 (`node:22-bookworm-slim` and `node:22-alpine`), not the Node 24 of the bare-metal
+packages and of our Node images. Supply chain: we trust upstream's images as its CI publishes
+them. The digest pin is the integrity anchor; the `org.opencontainers.image.revision` label is
+upstream's claim of the commit, not something we verify by building it.
 
 To run the stack on local builds:
 
@@ -204,13 +208,17 @@ with a message naming a missing or malformed variable.
   then proxies `/bigbluebutton/api/hooks` to it. `WEBHOOKS_BEARER_AUTH` (default `true`) selects
   how callbacks are authenticated: the shared secret as a Bearer token, or (`false`) a checksum
   in the callback URL. It must be exactly `true` or `false`: compose writes it into
-  `NODE_CONFIG` as a JSON boolean, and with any other value node-config reports the malformed
-  JSON and ignores all of `NODE_CONFIG` (`docker compose run --rm setup` validates it). A Tier 3
-  `/etc/bigbluebutton/bbb-webhooks/production.yml` is merged over the image's configuration;
-  the shared secret, the domain, redis, the listen address and Bearer auth come from the
-  environment and `NODE_CONFIG` and cannot be changed there. Upstream's image does not check
-  the values: bbb-web and akka-apps reject a malformed `BBB_DOMAIN` or `BBB_SHARED_SECRET` at
-  start.
+  `NODE_CONFIG` as a JSON boolean. With any other value node-config reports the malformed JSON
+  and ignores all of `NODE_CONFIG`; the service's healthcheck (in `docker-compose.yml`, as
+  upstream's image has none; a Kubernetes probe repeats it) then fails, so `docker compose up
+  --wait` fails too (`docker compose run --rm setup` also validates it). A Tier 3
+  `/etc/bigbluebutton/bbb-webhooks/production.yml` is merged over the image's configuration.
+  The shared secret, the domain, redis and the listen address come from the environment, and
+  Bearer auth (`bbb.auth2_0`) and `getRaw` (`modules."../out/webhooks/index.js".config.getRaw`)
+  from `NODE_CONFIG`, which node-config merges after all files: none of them can be changed
+  there (on bare metal `getRaw` can, as the postinst writes it into `default.yml`). Upstream's
+  image does not check the values: bbb-web and akka-apps reject a malformed `BBB_DOMAIN` or
+  `BBB_SHARED_SECRET` at start.
 - **Office documents** (Word, PowerPoint, Excel, OpenDocument and the other formats LibreOffice
   reads) are converted to PDF by the `conversion` service, for bbb-web's presentation upload.
   On bare metal, bbb-web runs LibreOffice in a new `docker run --network none bbb-soffice`
@@ -383,7 +391,10 @@ services are healthy and repeats the join path, without restarting nginx (see ab
 bbb-webrtc-sfu and webhooks containers (`node -e` in each): the package's settings, the adapter
 list without FreeSWITCH, the webhook receiver, Bearer auth as `--bearer-auth` says, and that
 the secrets come from the environment (compared there, never printed). For webhooks, which has
-no image of ours and so no golden-file case, it is the configuration test.
+no image of ours and so no golden-file case, it is the configuration test. The golden case
+`bbb-webrtc-sfu` pins only the image's partial file (`--render-only` writes
+`/usr/local/share/bbb/bbb-webrtc-sfu/production.yml`); the effective configuration merged with
+upstream's is covered by `config-check.sh`.
 
 `docker/tests/stack/notes-pdf-check.sh` checks the PDF converter of the shared-notes image on
 its own: like the bare-metal unit (`PrivateNetwork=true`, `IPAddressDeny=any`), wkhtmltopdf runs
