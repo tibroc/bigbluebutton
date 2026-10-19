@@ -119,7 +119,8 @@ jobs:
       - name: Export digest
         if: env.PUSH == 'true'
         env:
-          DIGEST: ${{ fromJSON(steps.push.outputs.metadata)[inputs.target]['containerimage.digest'] }}
+          # metadata is empty when the build failed; '{}' keeps the expression valid.
+          DIGEST: ${{ fromJSON(steps.push.outputs.metadata || '{}')[inputs.target]['containerimage.digest'] }}
         run: |
           mkdir -p "$RUNNER_TEMP/digests"
           touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
