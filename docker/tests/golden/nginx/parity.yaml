@@ -79,30 +79,34 @@ allowed:
   # learning dashboard: the app is served by its own image, only the per-meeting JSON comes from
   # the bbb-data volume. The upstream file has CRLF line endings, hence [[:space:]]*$.
   - file: usr/share/bigbluebutton/nginx/learning-dashboard.nginx
-    line: '^[[:space:]]*(alias /var/bigbluebutton/learning-dashboard/|proxy_pass http://learning-dashboard:8080);[[:space:]]*$'
-    reason: "human decision 2026-10-19 (T-055, one image per static app) and ADR-09: the app is served by the learning-dashboard image (service learning-dashboard, port 8080), and /var/bigbluebutton is the bbb-data volume, which holds only the JSON files bbb-web writes, so the prefix proxies to that service"
+    line: '^[[:space:]]*(alias /var/bigbluebutton/learning-dashboard/|proxy_pass http://learning-dashboard);[[:space:]]*$'
+    reason: "human decision 2026-10-19 (T-055, one image per static app) and ADR-09: the app is served by the learning-dashboard image (service learning-dashboard, port 8080), and /var/bigbluebutton is the bbb-data volume, which holds only the JSON files bbb-web writes, so the prefix proxies to that service. Human decision 2026-10-19 (T-056): the service is an upstream group of /etc/nginx/conf.d/bbb-upstreams.conf (`server <service>:<port> resolve`), so nginx re-resolves the name and follows a restarted container; `proxy_pass` names the group, without the port"
   - file: usr/share/bigbluebutton/nginx/learning-dashboard.nginx
     line: '^([[:space:]]*location ~ "[^"]*/learning_dashboard_data[^"]*" \{|[[:space:]]*alias /var/bigbluebutton/learning-dashboard/\$1;|[[:space:]]*\}|)[[:space:]]*$'
     reason: "ADR-09 / compose.md Volumes ('nginx has separate locations for it and for volume content'): a regex location nested in the prefix serves only <meetingId>/<token>/learning_dashboard_data.json from bbb-data, where bbb-web writes it (LearningDashboardService.java:34,40,96 @ 35cad46a9f)"
   # fragments: services are other containers (compose.md 'Service names')
+  # etc/nginx/conf.d/bbb-upstreams.conf has no bare-metal counterpart (there, every service is on
+  # 127.0.0.1): it holds the upstream groups the fragments below name (human decision 2026-10-19, T-056).
+  # etc/nginx/sites-available/bbb-feature-upstreams (sites-enabled/ links it) has none either: the
+  # groups of the enabled optional features (webhooks), written with their fragments; comment-only here
   - file: usr/share/bigbluebutton/nginx/bbb-shared-notes-server.nginx
-    line: '^[[:space:]]*proxy_pass http://(localhost|shared-notes):8787/(collaboration|api/|sample);$'
-    reason: "compose.md 'Service names': shared-notes is its own container (port 8787, bbb-shared-notes-server/config/default.yml:3)"
+    line: '^[[:space:]]*proxy_pass http://(localhost:8787|shared-notes)/(collaboration|api/|sample);$'
+    reason: "compose.md 'Service names': shared-notes is its own container (port 8787, bbb-shared-notes-server/config/default.yml:3). Human decision 2026-10-19 (T-056): the service is an upstream group of /etc/nginx/conf.d/bbb-upstreams.conf (`server <service>:<port> resolve`), so nginx re-resolves the name and follows a restarted container; `proxy_pass` names the group, without the port"
   - file: usr/share/bigbluebutton/nginx/bbb-shared-notes-server.nginx
-    line: '^[[:space:]]*proxy_pass[[:space:]]+http://(127\.0\.0\.1|bbb-web):8090/bigbluebutton/connection/checkGraphqlAuthorization;$'
-    reason: "compose.md 'Service names': bbb-web is its own container"
+    line: '^[[:space:]]*proxy_pass[[:space:]]+http://(127\.0\.0\.1:8090|bbb-web)/bigbluebutton/connection/checkGraphqlAuthorization;$'
+    reason: "compose.md 'Service names': bbb-web is its own container. Human decision 2026-10-19 (T-056): the service is an upstream group of /etc/nginx/conf.d/bbb-upstreams.conf (`server <service>:<port> resolve`), so nginx re-resolves the name and follows a restarted container; `proxy_pass` names the group, without the port"
   - file: usr/share/bigbluebutton/nginx/graphql.nginx
-    line: '^[[:space:]]*proxy_pass[[:space:]]+http://(127\.0\.0\.1|graphql-middleware):8378; #Graphql Middleware$'
-    reason: "compose.md 'Service names': graphql-middleware is its own container"
+    line: '^[[:space:]]*proxy_pass[[:space:]]+http://(127\.0\.0\.1:8378|graphql-middleware); #Graphql Middleware$'
+    reason: "compose.md 'Service names': graphql-middleware is its own container. Human decision 2026-10-19 (T-056): the service is an upstream group of /etc/nginx/conf.d/bbb-upstreams.conf (`server <service>:<port> resolve`), so nginx re-resolves the name and follows a restarted container; `proxy_pass` names the group, without the port"
   - file: usr/share/bigbluebutton/nginx/graphql.nginx
-    line: '^[[:space:]]*proxy_pass http://(127\.0\.0\.1:8185|graphql-server:8085); #Hasura$'
-    reason: "adr-templating.md row 29: Hasura REST goes to graphql-server:8085 directly; no local load balancer (hasura-loadbalancer.conf), replicas sit behind one service name"
+    line: '^[[:space:]]*proxy_pass http://(127\.0\.0\.1:8185|graphql-server); #Hasura$'
+    reason: "adr-templating.md row 29: Hasura REST goes to graphql-server:8085 directly; no local load balancer (hasura-loadbalancer.conf), replicas sit behind one service name (graphql-server:8085). Human decision 2026-10-19 (T-056): the service is an upstream group of /etc/nginx/conf.d/bbb-upstreams.conf (`server <service>:<port> resolve`), so nginx re-resolves the name and follows a restarted container; `proxy_pass` names the group, without the port"
   - file: usr/share/bigbluebutton/nginx/livekit.nginx
-    line: '^[[:space:]]*proxy_pass http://(127\.0\.0\.1|livekit):7880/;$'
-    reason: "ADR-06 / compose.md 'Routing on 443': location /livekit/ to livekit:7880 (OQ-05)"
+    line: '^[[:space:]]*proxy_pass http://(127\.0\.0\.1:7880|livekit)/;$'
+    reason: "ADR-06 / compose.md 'Routing on 443': location /livekit/ to livekit:7880 (OQ-05); the trailing slash still strips /livekit/. Human decision 2026-10-19 (T-056): the service is an upstream group of /etc/nginx/conf.d/bbb-upstreams.conf (`server <service>:<port> resolve`), so nginx re-resolves the name and follows a restarted container; `proxy_pass` names the group, without the port"
   - file: usr/share/bigbluebutton/nginx/web
-    line: '^[[:space:]]*proxy_pass[[:space:]]+http://(127\.0\.0\.1|bbb-web):8090(\$uri\$is_args\$args)?;$'
-    reason: "compose.md 'Service names': bbb-web is its own container (port 8090, bbb-web.env:3)"
+    line: '^[[:space:]]*proxy_pass[[:space:]]+http://(127\.0\.0\.1:8090|bbb-web)(\$uri\$is_args\$args)?;$'
+    reason: "compose.md 'Service names': bbb-web is its own container (port 8090, bbb-web.env:3). Human decision 2026-10-19 (T-056): the service is an upstream group of /etc/nginx/conf.d/bbb-upstreams.conf (`server <service>:<port> resolve`), so nginx re-resolves the name and follows a restarted container; `proxy_pass` names the group, without the port; with variables, nginx also looks the name up among the upstream groups first"
   - file: usr/share/bigbluebutton/nginx/webrtc-sfu.nginx
-    line: '^[[:space:]]*proxy_pass http://(127\.0\.0\.1|bbb-webrtc-sfu):3008;$'
-    reason: "compose.md 'Service names': bbb-webrtc-sfu is its own container (client port 3008, contract internal CLIENT_HOST)"
+    line: '^[[:space:]]*proxy_pass http://(127\.0\.0\.1:3008|bbb-webrtc-sfu);$'
+    reason: "compose.md 'Service names': bbb-webrtc-sfu is its own container (client port 3008, contract internal CLIENT_HOST). Human decision 2026-10-19 (T-056): the service is an upstream group of /etc/nginx/conf.d/bbb-upstreams.conf (`server <service>:<port> resolve`), so nginx re-resolves the name and follows a restarted container; `proxy_pass` names the group, without the port"

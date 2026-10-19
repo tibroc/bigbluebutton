@@ -11,8 +11,9 @@
 #                      compose file (localhost/bbb-<image>:TAG, built with
 #                      docker/tests/buildkit/build.sh --tag TAG). Images pinned by digest
 #                      (redis) are pulled by the Engine instead.
-#   up                 issue the test certificate (see below), docker compose up -d --wait,
-#                      certbot scaled to 0, then restart nginx
+#   up [ARG...]        issue the test certificate (see below), then docker compose up -d
+#                      --wait with certbot scaled to 0 (ARGs passed on, e.g. --scale
+#                      webhooks=0)
 #   test [ARG...]      docker/tests/stack/join-path.sh against the stack (ARGs passed on)
 #   webhooks ARG...    docker/tests/stack/webhooks-check.sh against the stack (ARGs passed on)
 #   compose ARG...     docker compose ARG... for the stack
@@ -162,12 +163,9 @@ up() {
     test_pki
     compose up --no-start --scale certbot=0
     install_certificate
-    # --wait: returns once every service is running and healthy (db-init: exited 0). Then
-    # nginx is restarted, as after every `up -d` that may have recreated one of its upstreams
-    # (docker/README.md, "Restart nginx after recreating an upstream").
-    compose up -d --wait --wait-timeout 600 --scale certbot=0
-    compose restart nginx
-    compose up -d --wait --wait-timeout 600 --scale certbot=0
+    # --wait: returns once every service is running and healthy (db-init: exited 0). nginx
+    # follows recreated upstreams by itself (docker/README.md, "nginx follows restarted services").
+    compose up -d --wait --wait-timeout 600 --scale certbot=0 "$@"
 }
 
 [ $# -ge 1 ] || usage
@@ -175,12 +173,12 @@ cmd="$1"; shift
 case "$cmd" in
     start) start ;;
     load) load "$@" ;;
-    up) up ;;
+    up) up "$@" ;;
     test)
         require_running
         BBB_SHARED_SECRET="$(sed -n 's/^BBB_SHARED_SECRET=//p' "$HERE/fixture.env")" \
             "$HERE/join-path.sh" --insecure --docker "podman exec -i $NAME docker" \
-            --compose "podman exec -i $NAME docker compose $COMPOSE_ARGS" \
+            --compose "podman exec -i -e BBB_IMAGE_TAG=$TAG $NAME docker compose $COMPOSE_ARGS" \
             --client-image "localhost/bbb-graphql-actions:$TAG" "$@"
         ;;
     webhooks)
