@@ -18,7 +18,7 @@ services:
   # create, without depending on public DNS or on the router sending the host's traffic to its
   # own public address back in (hairpin NAT).
   haproxy:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-haproxy:${BBB_IMAGE_TAG:-4.0.1}
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-haproxy:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
     environment:
       BBB_DOMAIN: ${BBB_DOMAIN}
@@ -47,7 +47,7 @@ services:
   # Obtains and renews the certificate for BBB_DOMAIN (HTTP-01 through nginx on :80) and writes
   # the haproxy bundle into `certs`; haproxy reloads it by itself.
   certbot:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-certbot:${BBB_IMAGE_TAG:-4.0.1}
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-certbot:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
     environment:
       BBB_DOMAIN: ${BBB_DOMAIN}
@@ -76,7 +76,7 @@ services:
   # html5 client and the learning dashboard). nginx re-resolves the upstream service names
   # (docker/nginx/bbb-upstreams.conf), so a recreated upstream is followed without a restart.
   nginx:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-nginx:${BBB_IMAGE_TAG:-4.0.1}
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-nginx:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
     environment:
       BBB_FEATURES: ${BBB_FEATURES-recording}
@@ -126,7 +126,7 @@ services:
 
   # The html5 client (static files, port 8080); nginx proxies /html5client to it.
   html5:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-html5-client:${BBB_IMAGE_TAG:-4.0.1}
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-html5-client:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -143,7 +143,7 @@ services:
   # The learning analytics dashboard app (static files, port 8080); nginx proxies
   # /learning-analytics-dashboard/ to it and serves the per-meeting data from bbb-data itself.
   learning-dashboard:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-learning-dashboard:${BBB_IMAGE_TAG:-4.0.1}
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-learning-dashboard:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -158,7 +158,7 @@ services:
       retries: 3
 
   bbb-web:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-web:${BBB_IMAGE_TAG:-4.0.1}
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-web:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
     user: "${BBB_UID:-998}:${BBB_GID:-998}"
     environment:
@@ -189,7 +189,7 @@ services:
       retries: 3
 
   akka-apps:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-apps-akka:${BBB_IMAGE_TAG:-4.0.1}
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-apps-akka:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
     environment:
       BBB_DOMAIN: ${BBB_DOMAIN}
@@ -219,7 +219,7 @@ services:
   # Hasura. start_period covers the entrypoint's metadata apply, which waits up to 180 s for
   # the database (the image's 120 s are shorter).
   graphql-server:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-graphql-server:${BBB_IMAGE_TAG:-4.0.1}
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-graphql-server:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
     environment:
       HASURA_ADMIN_SECRET: ${HASURA_ADMIN_SECRET}
@@ -246,7 +246,7 @@ services:
       retries: 3
 
   graphql-middleware:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-graphql-middleware:${BBB_IMAGE_TAG:-4.0.1}
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-graphql-middleware:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -266,7 +266,7 @@ services:
       retries: 3
 
   graphql-actions:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-graphql-actions:${BBB_IMAGE_TAG:-4.0.1}
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-graphql-actions:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -285,7 +285,7 @@ services:
 
   # BlockNote backend. Attached to the internal `notes` network only (compose.md, OQ-21).
   shared-notes:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-shared-notes:${BBB_IMAGE_TAG:-4.0.1}
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-shared-notes:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
     environment:
       POSTGRES_BLOCKNOTE_PASSWORD: ${POSTGRES_BLOCKNOTE_PASSWORD:-}
@@ -314,7 +314,7 @@ services:
   # bbb-data, so it runs as BBB_UID/BBB_GID like bbb-web. It exits when redis goes away (as on
   # bare metal, where systemd restarts it); the restart policy brings it back.
   export-annotations:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-export-annotations:${BBB_IMAGE_TAG:-4.0.1}
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-export-annotations:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
     user: "${BBB_UID:-998}:${BBB_GID:-998}"
     read_only: true
@@ -358,7 +358,7 @@ services:
       retries: 3
 
   postgres:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-postgres:${BBB_IMAGE_TAG:-4.0.1}
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-postgres:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -381,7 +381,7 @@ services:
   # Run-only job (ADR-14): (re)creates the BBB databases and roles when the image version
   # changes, then exits. `docker compose up` runs it before its dependents.
   db-init:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-db-init:${BBB_IMAGE_TAG:-4.0.1}
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-db-init:${BBB_IMAGE_TAG:-4.0.1}
     restart: "no"
     labels:
       org.bigbluebutton.run-only: "true"
@@ -403,7 +403,7 @@ services:
   # Media server (ADR-06): one UDP port for all WebRTC media, published 1:1; signaling through
   # nginx (/livekit/). Fixed address on `bbb`: coturn relays only to it.
   livekit:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-livekit:${BBB_IMAGE_TAG:-4.0.1}
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-livekit:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
     environment:
       BBB_PUBLIC_IPV4: ${BBB_PUBLIC_IPV4}
@@ -428,7 +428,7 @@ services:
 
   # LiveKit controller (ADR-15), FreeSWITCH adapter removed.
   bbb-webrtc-sfu:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-webrtc-sfu:${BBB_IMAGE_TAG:-4.0.1}
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-webrtc-sfu:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
     user: "${BBB_UID:-998}:${BBB_GID:-998}"
     environment:
@@ -456,7 +456,7 @@ services:
   # TURN (ADR-07): 3478/udp+tcp published, TURN over TLS arrives through haproxy on 443. The
   # relay range stays internal. The base image also exposes 5349, which is not published.
   coturn:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-coturn:${BBB_IMAGE_TAG:-4.0.1}
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-coturn:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
     environment:
       BBB_DOMAIN: ${BBB_DOMAIN}
@@ -483,7 +483,7 @@ services:
   # Optional, as on bare metal (BBB_FEATURES=webhooks). nginx proxies /bigbluebutton/api/hooks
   # to it; it reads the meeting events from redis.
   webhooks:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-webhooks:${BBB_IMAGE_TAG:-4.0.1}
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-webhooks:${BBB_IMAGE_TAG:-4.0.1}
     profiles: [webhooks]
     restart: unless-stopped
     environment:

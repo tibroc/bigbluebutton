@@ -40,20 +40,22 @@ jobs:
       - name: Check out the repo
         uses: actions/checkout@v5
 
-      # ghcr.io/<owner>/<image>: ghcr.io/bigbluebutton/bbb-web upstream, the default image path
-      # of docker-compose.yml. Registry paths must be lower case.
+      # ghcr.io/<owner>/<repository>/<image>: ghcr.io/bigbluebutton/bigbluebutton/bbb-web upstream,
+      # the default image path of docker-compose.yml. Inside the repository's namespace, so the images
+      # never collide with those the component repositories publish (ghcr.io/bigbluebutton/bbb-webrtc-sfu …).
+      # Registry paths must be lower case.
       # COMMIT_DATE (bake variable, docker/bake/html5-client.hcl): the html5 client's build
       # identifier, the commit date as upstream's package build sets it (build/setup.sh). All
       # platforms of one commit get the same value.
       - name: Prepare
         env:
           PLATFORM: ${{ matrix.platform }}
-          OWNER: ${{ github.repository_owner }}
+          REPOSITORY: ${{ github.repository }}
           IMAGE_NAME: ${{ inputs.image_name }}
         run: |
           {
             echo "PLATFORM_PAIR=${PLATFORM//\//-}"
-            echo "IMAGE=ghcr.io/${OWNER,,}/${IMAGE_NAME}"
+            echo "IMAGE=ghcr.io/${REPOSITORY,,}/${IMAGE_NAME}"
             echo "COMMIT_DATE=$(git log -1 --format=%cd --date=format:%Y%m%dT%H%M%S)"
           } >> "$GITHUB_ENV"
 
@@ -149,10 +151,10 @@ jobs:
       - name: Prepare
         id: image-output
         env:
-          OWNER: ${{ github.repository_owner }}
+          REPOSITORY: ${{ github.repository }}
           IMAGE_NAME: ${{ inputs.image_name }}
         run: |
-          echo "IMAGE=ghcr.io/${OWNER,,}/${IMAGE_NAME}" >> "$GITHUB_ENV"
+          echo "IMAGE=ghcr.io/${REPOSITORY,,}/${IMAGE_NAME}" >> "$GITHUB_ENV"
           # Same as metadata-action's type=sha tag below (short SHA, 7 characters).
           echo "IMAGE_TAG=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
       - name: Download digests

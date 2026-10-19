@@ -289,15 +289,16 @@ variables:
     tier: 2
     required: false
     secret: false
-    default: ghcr.io/bigbluebutton
+    default: ghcr.io/bigbluebutton/bigbluebutton
     pattern: '[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*'
     setup: null
     description: >-
-      Registry and namespace of the BBB images; compose uses
+      Registry and namespace of the BBB images (the repository's own namespace, so they never collide
+      with the images the component repositories publish, e.g. ghcr.io/bigbluebutton/bbb-webrtc-sfu); compose uses
       `${BBB_IMAGE_REGISTRY}/bbb-<image>:${BBB_IMAGE_TAG}`. Set `localhost` to run images built
       locally with `docker buildx bake`, which tags them the same way.
     consumers: [compose]
-    example: ghcr.io/bigbluebutton
+    example: ghcr.io/bigbluebutton/bigbluebutton
     status: draft
     notes: Human decision 2026-10-17 (one registry and one tag for all BBB images).
     sources:

@@ -56,7 +56,7 @@ the last definition wins). CI picks it up from there.
 ### Image names
 
 `docker-compose.yml` runs `${BBB_IMAGE_REGISTRY}/bbb-<image>:${BBB_IMAGE_TAG}` (defaults
-`ghcr.io/bigbluebutton` and `4.0.1`, see `docker/config-contract.yaml`). Bake tags local builds
+`ghcr.io/bigbluebutton/bigbluebutton` and `4.0.1`, see `docker/config-contract.yaml`). Bake tags local builds
 the same way, with the bake variables `BBB_IMAGE_REGISTRY` (default `localhost`) and
 `BBB_IMAGE_TAG` (default `4.0.1`). In CI the tags of docker/metadata-action replace them.
 
