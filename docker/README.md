@@ -78,6 +78,7 @@ the same way, with the bake variables `BBB_IMAGE_REGISTRY` (default `localhost`)
 | `shared-notes` | `bbb-shared-notes` | `shared-notes` |
 | `web` | `bbb-web` | `bbb-web` |
 | `webhooks` | `bbb-webhooks` | `webhooks` (profile `webhooks`) |
+| `setup` | `bbb-setup` | `setup` (profile `setup`, run-only: `docker compose run --rm setup`) |
 | `record-and-playback` | `bbb-record-and-playback` | not in the skeleton yet |
 | `html5-client` | `bbb-html5-client` | `html5` (also a build stage of `apps-akka` and `web`: its `settings.yml`) |
 | `learning-dashboard` | `bbb-learning-dashboard` | `learning-dashboard` |
@@ -158,9 +159,30 @@ with a message naming a missing or malformed variable.
   html5 (the html5 client), learning-dashboard, bbb-web, akka-apps, graphql-server,
   graphql-middleware, graphql-actions, shared-notes, export-annotations, redis, postgres, db-init (a job that exits after setting up the
   databases), livekit, bbb-webrtc-sfu and coturn, and the optional webhooks (profile
-  `webhooks`, below). Recording, office conversion, greenlight, monitoring, setup and preflight
-  follow; until then use `BBB_FEATURES=recording`, `BBB_FEATURES=webhooks`, both, or an empty
-  `BBB_FEATURES`.
+  `webhooks`, below), and the run-only `setup` that writes `.env` (below). Recording, office
+  conversion, greenlight, monitoring and preflight follow; until then use
+  `BBB_FEATURES=recording`, `BBB_FEATURES=webhooks`, both, or an empty `BBB_FEATURES`.
+- **Writing `.env`: `docker compose run --rm setup`.** The setup image writes `.env` next to
+  `docker-compose.yml` from the configuration contract: it starts from the existing `.env`, else
+  from `.env.sample` (built into the image from the same contract), keeps every value that is
+  already set and prints the names it kept, generates every secret and role password from
+  `/dev/urandom` to its contract pattern, asks for the domain, the ACME e-mail and the features,
+  and proposes the public addresses, validating each answer against its pattern. Variables
+  missing from `.env` (the PostgreSQL role passwords, or new ones after an upgrade) are appended
+  at its end. It writes the file atomically with mode `0600`; when nothing is missing it changes
+  nothing, so it can be run again after an upgrade. Values are never printed, only names. For
+  scripts, `--non-interactive` asks nothing and reads the asked values from the environment
+  (`docker compose run --rm -e BBB_DOMAIN=bbb.example.org -e ACME_EMAIL=admin@example.org -e
+  BBB_PUBLIC_IPV4=203.0.113.10 setup --non-interactive`); a missing required value is an error
+  that names it. Before `.env` exists, Docker Compose warns that the stack's variables are not
+  set; setup does not need them. An optional value that is set but empty (`BBB_FEATURES=`) counts as set. The
+  service has no network (`network_mode: none`) and contacts nothing, so it cannot see the
+  server's address: type it. With the host's network it proposes the address of the default
+  route's interface when that address is public (behind NAT, a floating IP, type the public one):
+  `docker run --rm -it --network host -v "$PWD:/project" <registry>/bbb-setup:<tag>`. It runs as
+  root with only the capabilities `CHOWN` and `DAC_OVERRIDE` and gives `.env` the owner of the
+  old `.env` (else of the directory); with `--user "$(id -u):$(id -g)"` it runs as you. The bind
+  mount of the compose directory is compose-only; on Kubernetes these values are Secrets.
 - **Webhooks** (bbb-webhooks, optional as on bare metal) run when `BBB_FEATURES` contains
   `webhooks`: `.env` derives `COMPOSE_PROFILES` from it, which starts the service, and nginx
   then proxies `/bigbluebutton/api/hooks` to it. `WEBHOOKS_BEARER_AUTH` (default `true`) selects

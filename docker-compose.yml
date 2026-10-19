@@ -3,10 +3,11 @@
 # file only wires them together. Variables: docker/config-contract.yaml (.env.sample is
 # generated from it). Each service gets only the contract variables it reads.
 #
+#   docker compose run --rm setup     # writes .env (secrets generated, domain etc. asked)
 #   docker compose up -d
 #
 # Optional (BBB_FEATURES/profiles): webhooks. Not in the stack yet: recording, office conversion,
-# greenlight, monitoring, setup and preflight. See docker/README.md.
+# greenlight, monitoring and preflight. See docker/README.md.
 
 name: bigbluebutton
 
@@ -399,6 +400,29 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  # Run-only tool, never started by `up` (profile setup): `docker compose run --rm setup` writes
+  # .env next to this file from the configuration contract (secrets generated, domain, e-mail,
+  # features and public address asked; values already in .env are kept). It has no network.
+  # It runs as root with only CHOWN and DAC_OVERRIDE, to write into a directory of any owner and
+  # give .env that owner; `--user "$(id -u):$(id -g)"` runs it as you instead. The bind mount of
+  # this directory is the compose-only part: Kubernetes keeps these values in Secrets.
+  setup:
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-setup:${BBB_IMAGE_TAG:-4.0.1}
+    profiles: [setup]
+    restart: "no"
+    labels:
+      org.bigbluebutton.run-only: "true"
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE]
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - .:/project
 
   # Media server (ADR-06): one UDP port for all WebRTC media, published 1:1; signaling through
   # nginx (/livekit/). Fixed address on `bbb`: coturn relays only to it.
