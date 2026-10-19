@@ -34,13 +34,22 @@ if [ $# -gt 0 ]; then
         files+=("$f")
     done
 else
-    while IFS= read -r f; do files+=("$f"); done < <(
+    while IFS= read -r f; do
+        # Not built until the recording stack is reworked (docker-bake.hcl default group).
+        [ "$f" = record-and-playback/Dockerfile ] && { echo "== $f: skipped (not built yet)"; continue; }
+        files+=("$f")
+    done < <(
         git -C "$REPO" ls-files -- '*Dockerfile' '*.Dockerfile' '*/Dockerfile.*' | sort
     )
 fi
 [ "${#files[@]}" -gt 0 ] || { echo "no Dockerfiles found" >&2; exit 2; }
 
 # The repository is mounted read-only; label=disable lets SELinux hosts read it unrelabelled.
+# Pull once up front, so that pull progress is never mistaken for findings of the first file.
+"$ENGINE" image inspect "$HADOLINT_IMAGE" >/dev/null 2>&1 \
+    || "$ENGINE" pull -q "$HADOLINT_IMAGE" >/dev/null \
+    || { echo "cannot pull $HADOLINT_IMAGE" >&2; exit 2; }
+
 rc=0
 for f in "${files[@]}"; do
     out="$("$ENGINE" run --rm --network none --security-opt label=disable \
