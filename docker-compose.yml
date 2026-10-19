@@ -1,7 +1,9 @@
 # BigBlueButton 4.0 container stack (walking skeleton). The only production compose file: it is
 # committed, never generated. Configuration logic lives in the images (their entrypoints); this
-# file only wires them together. Variables: docker/config-contract.yaml (.env.sample is
-# generated from it). Each service gets only the contract variables it reads.
+# file only wires them together, except for components whose upstream publishes an image
+# (webhooks, conversion), which run unchanged and are configured here. Variables:
+# docker/config-contract.yaml (.env.sample is generated from it). Each service gets only the
+# contract variables it reads.
 #
 #   docker compose run --rm setup     # writes .env (secrets generated, domain etc. asked)
 #   docker compose up -d
@@ -547,15 +549,24 @@ services:
       retries: 3
 
   # Optional, as on bare metal (BBB_FEATURES=webhooks). nginx proxies /bigbluebutton/api/hooks
-  # to it; it reads the meeting events from redis.
+  # to it; it reads the meeting events from redis. Upstream's image, unchanged, configured here
+  # through node-config: the environment variables of its config/custom-environment-variables.yml
+  # and NODE_CONFIG (JSON merged over its config files): Bearer auth as WEBHOOKS_BEARER_AUTH
+  # selects (any non-empty BEARER_AUTH would enable it, "false" included) and getRaw as the
+  # package's postinst sets it.
   webhooks:
-    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-webhooks:${BBB_IMAGE_TAG:-4.0.1}
+    # bbb-webhooks.placeholder.sh: v3.7.0 = 9787aea975 (the image's revision label)
+    image: ghcr.io/bigbluebutton/bbb-webhooks:3.7.0@sha256:e1c5144720b33a3959975f3dbb01e2b4d8d8728ab747c8ed5f860036f9444efb
     profiles: [webhooks]
     restart: unless-stopped
     environment:
-      BBB_DOMAIN: ${BBB_DOMAIN}
-      BBB_SHARED_SECRET: ${BBB_SHARED_SECRET}
-      WEBHOOKS_BEARER_AUTH: ${WEBHOOKS_BEARER_AUTH:-true}
+      SERVER_DOMAIN: ${BBB_DOMAIN}
+      SHARED_SECRET: ${BBB_SHARED_SECRET}
+      NODE_CONFIG: '{"bbb":{"auth2_0":${WEBHOOKS_BEARER_AUTH:-true}},"modules":{"../out/webhooks/index.js":{"config":{"getRaw":false}}}}'
+      SERVER_BIND_IP: 0.0.0.0
+      REDIS_HOST: redis
+      # npm (the image's `npm start`) would ask the registry for a newer npm at every start.
+      NPM_CONFIG_UPDATE_NOTIFIER: "false"
     read_only: true
     tmpfs:
       - /tmp
@@ -565,7 +576,10 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "/usr/local/lib/bbb/bbb-webhooks-healthcheck.js"]
+      # NODE_CONFIG is valid JSON with a boolean auth2_0 (else node-config would ignore it: a
+      # WEBHOOKS_BEARER_AUTH other than true/false makes the service unhealthy), and the hooks
+      # API accepts connections (a TCP connect: the API logs every request).
+      test: ["CMD", "node", "-e", "if (typeof JSON.parse(process.env.NODE_CONFIG).bbb.auth2_0 !== 'boolean') process.exit(1); require('net').connect(3005, '127.0.0.1').on('connect', () => process.exit(0)).on('error', () => process.exit(1))"]
       interval: 10s
       timeout: 5s
       start_period: 20s

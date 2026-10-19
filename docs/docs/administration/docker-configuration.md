@@ -318,7 +318,7 @@ Optional. Unset variables take the default shown.
 | [`BBB_WEB_MAX_HEAP_SIZE`](#bbb_web_max_heap_size) | no | `384m` | Java heap size of bbb-web (initial and maximum), JVM size syntax. |
 | [`RECORDING_RAW_RETENTION_DAYS`](#recording_raw_retention_days) | no | `14` | Deletes the raw recording data of recordings published more than N days ago (upstream published_days); 0 disables it. Published recordings are kept. |
 | [`RECORDING_WORKERS`](#recording_workers) | no | `1` | Number of parallel recording processing workers (resque COUNT). |
-| [`WEBHOOKS_BEARER_AUTH`](#webhooks_bearer_auth) | no | `true` | Webhooks send the shared secret as a Bearer token (true) or as a checksum in the URL (false). The entrypoint passes BEARER_AUTH=true or leaves it unset, never "false". |
+| [`WEBHOOKS_BEARER_AUTH`](#webhooks_bearer_auth) | no | `true` | Webhooks send the shared secret as a Bearer token (true) or as a checksum in the URL (false). docker-compose.yml writes the value into NODE_CONFIG as the JSON boolean bbb.auth2_0 (upstream's image, unchanged); it must be exactly true or false, else node-config ignores all of NODE_CONFIG and the service's healthcheck fails. |
 | [`LIVEKIT_RTC_UDP_PORT`](#livekit_rtc_udp_port) | no | `7882` | LiveKit WebRTC media port (one multiplexed UDP port for all clients), published 1:1. The LiveKit image also sets port_range_start/end to 0, otherwise LiveKit ignores it. There is no ICE-TCP; clients without UDP use TURN over 443. |
 | [`TURN_RELAY_PORT_MIN`](#turn_relay_port_min) | no | `49160` | First port of the coturn relay range (min-port). The range is used on the internal network only and is not published. |
 | [`TURN_RELAY_PORT_MAX`](#turn_relay_port_max) | no | `49199` | Last port of the coturn relay range (max-port); internal only, not published. |
@@ -457,7 +457,7 @@ Number of parallel recording processing workers (resque COUNT).
 
 ### WEBHOOKS_BEARER_AUTH
 
-Webhooks send the shared secret as a Bearer token (true) or as a checksum in the URL (false). The entrypoint passes BEARER_AUTH=true or leaves it unset, never "false".
+Webhooks send the shared secret as a Bearer token (true) or as a checksum in the URL (false). docker-compose.yml writes the value into NODE_CONFIG as the JSON boolean bbb.auth2_0 (upstream's image, unchanged); it must be exactly true or false, else node-config ignores all of NODE_CONFIG and the service's healthcheck fails.
 
 - **Required:** no. **Secret:** no.
 - **Default:** `true`
@@ -465,7 +465,7 @@ Webhooks send the shared secret as a Bearer token (true) or as a checksum in the
 - **Example:** `false`
 - **Used by:** webhooks
 - **Status:** draft
-- **Note:** bbb-webhooks treats any non-empty BEARER_AUTH, including "false", as enabled (LX-2).
+- **Note:** bbb-webhooks treats any non-empty BEARER_AUTH, including "false", as enabled (LX-2), so the value goes through NODE_CONFIG instead of BEARER_AUTH.
 - **Sources:**
   - `config/custom-environment-variables.yml:4 @ 9787aea975` — BEARER_AUTH without __format
   - `src/out/webhooks/callback-emitter.js:70-71 @ 9787aea975` — truthiness test
@@ -598,7 +598,7 @@ upstream configuration keys is visible; they are not settings.
 | `livekit_rtc` | `rtc.udp_port=${LIVEKIT_RTC_UDP_PORT}, rtc.port_range_start=0, rtc.port_range_end=0, rtc.tcp_port=0, rtc.advertise_internal_ip=true` | livekit: rtc block of the image base livekit.yaml | draft |
 | `sfu_livekit` | `LIVEKIT_KEY=${LIVEKIT_API_KEY}, LIVEKIT_SECRET=${LIVEKIT_API_SECRET}, LIVEKIT_BBB_DOMAIN=${BBB_DOMAIN}` | bbb-webrtc-sfu: native env (node-config custom-environment-variables) | draft |
 | `recorder_livekit` | `BBBRECORDER_LIVEKIT_APIKEY=${LIVEKIT_API_KEY}, BBBRECORDER_LIVEKIT_APISECRET=${LIVEKIT_API_SECRET}` | bbb-webrtc-recorder: native env | draft |
-| `webhooks_env` | `SERVER_DOMAIN=${BBB_DOMAIN}, SHARED_SECRET=${BBB_SHARED_SECRET}, BEARER_AUTH=true only if WEBHOOKS_BEARER_AUTH is true (else unset)` | webhooks: native env (node-config custom-environment-variables) | draft |
+| `webhooks_env` | `SERVER_DOMAIN=${BBB_DOMAIN}, SHARED_SECRET=${BBB_SHARED_SECRET}, NODE_CONFIG={"bbb":{"auth2_0":${WEBHOOKS_BEARER_AUTH}},"modules":{"../out/webhooks/index.js":{"config":{"getRaw":false}}}}` | webhooks: compose environment (upstream image; node-config env mapping and NODE_CONFIG) | draft |
 | `akka_shared_secret` | `${BBB_SHARED_SECRET}` | akka-apps: services.sharedSecret (HOCON optional env reference) | draft |
 | `recording_shared_secret` | `${BBB_SHARED_SECRET}` | recording: securitySalt in /etc/bigbluebutton/bbb-web.properties (real value, not a reference) | draft |
 | `hasura_admin_secret` | `${HASURA_ADMIN_SECRET}` | graphql-server: env HASURA_GRAPHQL_ADMIN_SECRET and admin_secret in config.yaml (CLI) | draft |
@@ -624,6 +624,7 @@ are not settings; changing them breaks the stack.
 | `SERVER_BIND_IP` | webhooks | `0.0.0.0` | API listener (3005) reachable from nginx. |
 | `REDIS_HOST` | webhooks | `redis` | Redis host for bbb-webhooks. |
 | `NODE_ENV` | webhooks | `production` | Needed for the Tier 3 file production.yml to load (LX-2). |
+| `NPM_CONFIG_UPDATE_NOTIFIER` | webhooks | `false` | Upstream's image starts with npm start; without this npm asks the registry for a newer npm at every start. |
 | `BBB_REDIS_HOST` | graphql-actions | `redis` | graphql-actions is configured by env only. |
 | `SERVER_HOST` | graphql-actions | `0.0.0.0` | Listener reachable from Hasura. |
 | `shared-notes: expressServer.host, redis.host, postgres.host, bbbWeb.host` | shared-notes | `0.0.0.0, redis, postgres, bbb-web` | Wiring rendered by the shared-notes image into its base YAML (no env support). Not a user variable (OQ-21); the express port stays 8787 (hard-coded loopback call). |
@@ -638,9 +639,9 @@ are not settings; changing them breaks the stack.
 | `graphql-middleware: config.yml wiring` | graphql-middleware | `server.listen_host=0.0.0.0, redis.host=redis, hasura.url=ws://graphql-server:8085/v1/graphql, graphql-actions.url=http://graphql-actions:8093, auth_hook.url=http://bbb-web:8090/..., session_vars_hook.url=http://akka-apps:8901/userInfo` | Upstream's config.yml with service names; Hasura directly, without the bare-metal nginx load balancer on 8185 (adr-templating row 29). |
 | `NODE_ENV` | graphql-actions | `production` | As in the systemd unit. |
 | `NODE_ENV` | shared-notes | `production` | As in the systemd unit. |
-| `NODE_ENV` | bbb-webrtc-sfu | `production` | As in the systemd unit. |
-| `NODE_CONFIG_DIR` | bbb-webrtc-sfu | `/etc/bigbluebutton/bbb-webrtc-sfu/:/usr/local/bigbluebutton/bbb-webrtc-sfu/config/` | As in the systemd unit; the first directory is the Tier 3 override location. |
-| `ALLOW_CONFIG_MUTATIONS` | bbb-webrtc-sfu | `true` | As in the systemd unit. |
+| `NODE_ENV` | bbb-webrtc-sfu | `production` | As in the systemd unit; set by upstream's image. |
+| `NODE_CONFIG_DIR` | bbb-webrtc-sfu | `/app/config/:/usr/local/share/bbb/bbb-webrtc-sfu/:/etc/bigbluebutton/bbb-webrtc-sfu/` | Upstream's directories with the image's file between them: upstream's config \< the package's changes \< the Tier 3 override (same base name, later directory wins). |
+| `ALLOW_CONFIG_MUTATIONS` | bbb-webrtc-sfu | `true` | As in the systemd unit; set by upstream's image. |
 | `bbb-web: redisHost and server.address` | bbb-web | `redisHost=redis, -Dserver.address=0.0.0.0, MALLOC_ARENA_MAX=2` | redis service name in the classpath properties; listen on all interfaces so nginx reaches port 8090; MALLOC_ARENA_MAX as the bare-metal start script. |
 | `nginx: proxy targets` | nginx | `bbb-web:8090, shared-notes:8787, graphql-middleware:8378, graphql-server:8085, livekit:7880, bbb-webrtc-sfu:3008, webhooks:3005` | Upstream's location fragments with service names instead of 127.0.0.1/localhost; listen 80 and 81 (proxy_protocol) on all interfaces. |
 
@@ -660,12 +661,12 @@ same as on a bare-metal server, so the existing documentation applies.
 | graphql-server | `/etc/bigbluebutton/bbb-graphql-server.env` | env | systemd EnvironmentFile on bare metal. Not read in containers: Hasura reads env, set it in a compose override. HASURA_GRAPHQL_ADMIN_SECRET comes from HASURA_ADMIN_SECRET. | not-supported |
 | shared-notes | `/etc/bigbluebutton/bbb-shared-notes-server.yml` | yaml | Deep merge by the service over default.yml (objects merged, arrays and scalars replaced). The image renders its wiring into default.yml, never into this path. | supported |
 | livekit | `/etc/bigbluebutton/livekit.yaml` | yaml | yq-go deep merge (image default * override) at start, as the upstream unit does. The image must not use LIVEKIT_CONFIG, which would silently replace both files. An override that sets a port range again disables the UDP port (keep port_range_start/end at 0). | supported |
-| bbb-webrtc-sfu | `/etc/bigbluebutton/bbb-webrtc-sfu/production.yml` | yaml | node-config: merged key by key over the image's config, arrays replaced. The image's base config drops the FreeSWITCH adapter (LX-4). **Environment first:** Env variables beat this file: livekit.key, livekit.secret, livekit.bbbDomain, livekit.host, redis.host and clientHost come from the image's env and cannot be changed here. | supported |
+| bbb-webrtc-sfu | `/etc/bigbluebutton/bbb-webrtc-sfu/production.yml` | yaml | node-config: merged key by key over upstream's config and the image's /usr/local/share/bbb/bbb-webrtc-sfu/production.yml, arrays replaced. The image's file drops the FreeSWITCH adapter (LX-4). **Environment first:** Env variables beat this file: livekit.key, livekit.secret, livekit.bbbDomain, livekit.host, redis.host and clientHost come from the image's env and cannot be changed here. | supported |
 | bbb-webrtc-recorder | `/etc/bigbluebutton/bbb-webrtc-recorder.yml` | yaml | Upstream the recorder loads exactly one file, so this file replaces the default (LX-3). Proposal: the entrypoint deep-merges it over the image default with yq-go and starts the recorder with -c on the result, matching what bbb-conf shows. | supported |
 | recording | `/etc/bigbluebutton/recording/recording.yml` | yaml | Shallow merge of top-level keys over bigbluebutton.yml (nested keys such as steps replaced as a whole). | supported |
 | recording | `/etc/bigbluebutton/recording/presentation.yml` | yaml | Loaded by the presentation scripts and merged over presentation.yml. | supported |
 | recording | `/etc/default/bigbluebutton-cron-config` | shell | Shell variables sourced by the cleanup script on bare metal. In containers the recording image writes it from RECORDING_RAW_RETENTION_DAYS; set the variable instead. | not-supported |
-| webhooks | `/etc/bigbluebutton/bbb-webhooks/production.yml` | yaml | node-config: merged key by key over config/default.yml (needs NODE_ENV=production; local.yml also works, default.yml does not). **Environment first:** Env variables beat this file (LX-2): bbb.serverDomain, bbb.sharedSecret, bbb.auth2_0 (BEARER_AUTH), redis host and the API bind address come from the image's env and cannot be changed here. | supported |
+| webhooks | `/etc/bigbluebutton/bbb-webhooks/production.yml` | yaml | node-config: merged key by key over config/default.yml (needs NODE_ENV=production; local.yml also works, default.yml does not). **Environment first:** Env variables and NODE_CONFIG beat this file (LX-2; node-config merges NODE_CONFIG after the files): bbb.serverDomain, bbb.sharedSecret, redis host and the API bind address come from the environment, bbb.auth2_0 and modules."../out/webhooks/index.js".config.getRaw from NODE_CONFIG (docker-compose.yml), and none of them can be changed here. | supported |
 | nginx | `/etc/bigbluebutton/nginx/` | nginx | Include directory: admins add or replace *.nginx files. Location fragments of the image are selected by the entrypoint per feature. | supported |
 | coturn | `/etc/turnserver.conf` | ini | Upstream has no override (bbb-install writes the whole file, and admins edit it in place). A file mounted at this path replaces the rendered one as a whole: the image uses it as is, renders nothing and logs a warning that the contract values are not applied (human decision 2026-10-17). | supported |
 

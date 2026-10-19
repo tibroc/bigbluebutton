@@ -4,7 +4,7 @@
 # (http://bbb-webrtc-sfu:3040/livekit-webhook), architecture.md (recording via bbb-webrtc-recorder).
 # LIVEKIT_ENABLED/LIVEKIT_HOST/REDIS_HOST/CLIENT_HOST and the credentials are env, not file content.
 render:
-  - file: usr/local/bigbluebutton/bbb-webrtc-sfu/config/default.yml   # upstream postinst TARGET
+  - file: usr/local/share/bbb/bbb-webrtc-sfu/production.yml   # the package's changes over upstream's config
     format: yaml
     checks:
       - {path: .audioMediaServer, equals: mediasoup}   # explicit; factory default is Freeswitch
@@ -12,7 +12,7 @@ render:
       - {path: .livekit.webhook.path, equals: /livekit-webhook}
       - {path: .livekit.recordingAdapter, equals: bbb-webrtc-recorder}   # code default is egress
       - {path: .livekit.secret, absent: true}   # env only; no shipped placeholder left in the file
-  - file: usr/local/bigbluebutton/bbb-webrtc-sfu/config/default.yml
+  - file: usr/local/share/bbb/bbb-webrtc-sfu/production.yml
     format: lines
     checks:
       - {no_line: 'freeswitch/freeswitch\.js'}      # adapter entry gone (LX-4: no ESL retries)

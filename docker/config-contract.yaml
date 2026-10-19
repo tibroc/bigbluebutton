@@ -503,11 +503,15 @@ variables:
     setup: null
     description: >-
       Webhooks send the shared secret as a Bearer token (true) or as a checksum in the URL
-      (false). The entrypoint passes BEARER_AUTH=true or leaves it unset, never "false".
+      (false). docker-compose.yml writes the value into NODE_CONFIG as the JSON boolean
+      bbb.auth2_0 (upstream's image, unchanged); it must be exactly true or false, else
+      node-config ignores all of NODE_CONFIG and the service's healthcheck fails.
     consumers: [webhooks]
     example: 'false'
     status: draft
-    notes: bbb-webhooks treats any non-empty BEARER_AUTH, including "false", as enabled (LX-2).
+    notes: >-
+      bbb-webhooks treats any non-empty BEARER_AUTH, including "false", as enabled (LX-2), so
+      the value goes through NODE_CONFIG instead of BEARER_AUTH.
     sources:
       - config/custom-environment-variables.yml:4 @ 9787aea975 — BEARER_AUTH without __format
       - src/out/webhooks/callback-emitter.js:70-71 @ 9787aea975 — truthiness test
@@ -763,9 +767,9 @@ derived:
       - internal/config/loader.go:13-29,38-50 @ 1ecff54c7c
 
   - name: webhooks_env
-    formula: 'SERVER_DOMAIN=${BBB_DOMAIN}, SHARED_SECRET=${BBB_SHARED_SECRET}, BEARER_AUTH=true only if WEBHOOKS_BEARER_AUTH is true (else unset)'
+    formula: 'SERVER_DOMAIN=${BBB_DOMAIN}, SHARED_SECRET=${BBB_SHARED_SECRET}, NODE_CONFIG={"bbb":{"auth2_0":${WEBHOOKS_BEARER_AUTH}},"modules":{"../out/webhooks/index.js":{"config":{"getRaw":false}}}}'
     inputs: [BBB_DOMAIN, BBB_SHARED_SECRET, WEBHOOKS_BEARER_AUTH]
-    targets: ['webhooks: native env (node-config custom-environment-variables)']
+    targets: ['webhooks: compose environment (upstream image; node-config env mapping and NODE_CONFIG)']
     description: bbb-webhooks configuration from the contract (LX-2).
     status: draft
     sources:
@@ -933,6 +937,15 @@ internal:
     status: draft
     sources:
       - build/packages-template/bbb-webhooks/bbb-webhooks.service:8-9,14 @ 35cad46a9f
+      - Dockerfile:7 @ 9787aea975 — set by upstream's image
+
+  - name: NPM_CONFIG_UPDATE_NOTIFIER
+    consumer: webhooks
+    value: 'false'
+    description: Upstream's image starts with npm start; without this npm asks the registry for a newer npm at every start.
+    status: draft
+    sources:
+      - Dockerfile:19 @ 9787aea975
 
   - name: BBB_REDIS_HOST
     consumer: graphql-actions
@@ -1064,28 +1077,30 @@ internal:
     consumer: bbb-webrtc-sfu
     value: 'production'
     description: >-
-      As in the systemd unit.
+      As in the systemd unit; set by upstream's image.
     status: draft
     sources:
-      - docker/bbb-webrtc-sfu/Dockerfile:84 @ 5933f0dda4
+      - Dockerfile:43 @ 88cb1a9a1c
 
   - name: NODE_CONFIG_DIR
     consumer: bbb-webrtc-sfu
-    value: '/etc/bigbluebutton/bbb-webrtc-sfu/:/usr/local/bigbluebutton/bbb-webrtc-sfu/config/'
+    value: '/app/config/:/usr/local/share/bbb/bbb-webrtc-sfu/:/etc/bigbluebutton/bbb-webrtc-sfu/'
     description: >-
-      As in the systemd unit; the first directory is the Tier 3 override location.
+      Upstream's directories with the image's file between them: upstream's config < the
+      package's changes < the Tier 3 override (same base name, later directory wins).
     status: draft
     sources:
-      - docker/bbb-webrtc-sfu/Dockerfile:85 @ 5933f0dda4
+      - docker/bbb-webrtc-sfu/Dockerfile:31 @ 153d8c3b08
+      - Dockerfile:44 @ 88cb1a9a1c
 
   - name: ALLOW_CONFIG_MUTATIONS
     consumer: bbb-webrtc-sfu
     value: 'true'
     description: >-
-      As in the systemd unit.
+      As in the systemd unit; set by upstream's image.
     status: draft
     sources:
-      - docker/bbb-webrtc-sfu/Dockerfile:86 @ 5933f0dda4
+      - Dockerfile:45 @ 88cb1a9a1c
 
   - name: 'bbb-web: redisHost and server.address'
     consumer: bbb-web
@@ -1213,8 +1228,9 @@ overrides:
     path: /etc/bigbluebutton/bbb-webrtc-sfu/production.yml
     format: yaml
     merge: >-
-      node-config: merged key by key over the image's config, arrays replaced. The image's base
-      config drops the FreeSWITCH adapter (LX-4).
+      node-config: merged key by key over upstream's config and the image's
+      /usr/local/share/bbb/bbb-webrtc-sfu/production.yml, arrays replaced. The image's file
+      drops the FreeSWITCH adapter (LX-4).
     env_precedence: >-
       Env variables beat this file: livekit.key, livekit.secret, livekit.bbbDomain,
       livekit.host, redis.host and clientHost come from the image's env and cannot be changed
@@ -1276,9 +1292,10 @@ overrides:
       node-config: merged key by key over config/default.yml (needs NODE_ENV=production; local.yml
       also works, default.yml does not).
     env_precedence: >-
-      Env variables beat this file (LX-2): bbb.serverDomain, bbb.sharedSecret, bbb.auth2_0
-      (BEARER_AUTH), redis host and the API bind address come from the image's env and cannot
-      be changed here.
+      Env variables and NODE_CONFIG beat this file (LX-2; node-config merges NODE_CONFIG after
+      the files): bbb.serverDomain, bbb.sharedSecret, redis host and the API bind address come
+      from the environment, bbb.auth2_0 and modules."../out/webhooks/index.js".config.getRaw
+      from NODE_CONFIG (docker-compose.yml), and none of them can be changed here.
     support: supported
     status: draft
     sources:
