@@ -1,21 +1,6 @@
 # running in production (static assets)
+# The html5 client image (service html5) serves the package's static locations itself
+# (/html5client with gzip_static, locales, wasm); this location passes them on unchanged.
 location /html5client {
-    gzip_static on;
-    alias /usr/share/bigbluebutton/html5-client/;
-    index index.html;
-    try_files $uri $uri/ =404;
-}
-
-location /html5client/locales {
-  alias /usr/share/bigbluebutton/html5-client/locales;
-  autoindex on;
-  autoindex_format json;
-}
-
-location /html5client/wasm {
-    types {
-        application/wasm wasm;
-    }
-    gzip_static on;
-    alias /usr/share/bigbluebutton/html5-client/wasm;
+    proxy_pass http://html5:8080;
 }

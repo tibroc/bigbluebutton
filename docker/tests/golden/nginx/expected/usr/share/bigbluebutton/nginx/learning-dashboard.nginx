@@ -1,5 +1,5 @@
 location /learning-analytics-dashboard/ {
-    alias /usr/share/bigbluebutton/learning-dashboard/;
+    proxy_pass http://learning-dashboard:8080;
     autoindex off;
 
     location ~ "^/learning-analytics-dashboard/([^/]+/[^/]+/learning_dashboard_data\.json)$" {

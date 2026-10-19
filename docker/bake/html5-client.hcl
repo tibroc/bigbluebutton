@@ -1,6 +1,6 @@
-# Build stage of the nginx image (docker/bake/nginx.hcl): the static html5 client, not a service.
-# akka-apps and bbb-web take its settings.yml (docker/bake/apps-akka.hcl, web.hcl), so all
-# three images carry the same build identifier.
+# The html5 client, served on port 8080 (compose service `html5`; the edge nginx proxies
+# /html5client to it). akka-apps and bbb-web take its settings.yml (docker/bake/apps-akka.hcl,
+# web.hcl), so all three images carry the same build identifier.
 
 # Client build identifier (html5ClientBuild in settings.yml, the ?v= cache buster of index.html
 # and fonts.css), as upstream's package build passes it to build/packages-template/bbb-html5/
@@ -17,11 +17,12 @@ target "_html5-client-tags" {
 }
 
 target "html5-client" {
-    inherits = ["_html5-client-tags", "docker-metadata-action"]
+    inherits = ["_html5-client-tags", "docker-metadata-action", "_entrypoint-lib"]
     platforms = compact(split(",", BBB_PLATFORMS))
     context = "./bigbluebutton-html5"
     contexts = {
         bbb-config = "./bigbluebutton-config"
+        packages = "./build/packages-template"
     }
     args = {
         COMMIT_DATE = COMMIT_DATE

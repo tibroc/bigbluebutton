@@ -68,8 +68,7 @@ ln -sfn "$FRAGMENT_DIR/web" "$dest"
 # render-only mode a copy is written so that tests see the whole configuration.
 if bbb_is_render_only; then
     for file in /etc/nginx/nginx.conf /etc/nginx/conf.d/bbb-graphql-client-settings-cache.conf \
-        /usr/share/bigbluebutton/include_default.nginx \
-        /usr/share/bigbluebutton/html5-client/private/config/settings.yml; do
+        /usr/share/bigbluebutton/include_default.nginx; do
         dest="$(bbb_path "$file")"
         bbb_render "$file" "$dest"
     done

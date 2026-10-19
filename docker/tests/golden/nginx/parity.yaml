@@ -76,11 +76,11 @@ allowed:
   - file: etc/nginx/sites-available/bigbluebutton
     line: '^$'
     reason: "blank lines around the removed port 82 listeners and the added include"
-  # learning dashboard: the app is shipped in the image, only the per-meeting JSON comes from
+  # learning dashboard: the app is served by its own image, only the per-meeting JSON comes from
   # the bbb-data volume. The upstream file has CRLF line endings, hence [[:space:]]*$.
   - file: usr/share/bigbluebutton/nginx/learning-dashboard.nginx
-    line: '^[[:space:]]*alias /(var|usr/share)/bigbluebutton/learning-dashboard/;[[:space:]]*$'
-    reason: "ADR-09 / compose.md Volumes ('Image-shipped content (... dashboard static files ...) is served by nginx from its image'): /var/bigbluebutton is the bbb-data volume, which holds only the JSON files bbb-web writes, so the prefix serves the app from /usr/share/bigbluebutton/learning-dashboard"
+    line: '^[[:space:]]*(alias /var/bigbluebutton/learning-dashboard/|proxy_pass http://learning-dashboard:8080);[[:space:]]*$'
+    reason: "human decision 2026-10-19 (T-055, one image per static app) and ADR-09: the app is served by the learning-dashboard image (service learning-dashboard, port 8080), and /var/bigbluebutton is the bbb-data volume, which holds only the JSON files bbb-web writes, so the prefix proxies to that service"
   - file: usr/share/bigbluebutton/nginx/learning-dashboard.nginx
     line: '^([[:space:]]*location ~ "[^"]*/learning_dashboard_data[^"]*" \{|[[:space:]]*alias /var/bigbluebutton/learning-dashboard/\$1;|[[:space:]]*\}|)[[:space:]]*$'
     reason: "ADR-09 / compose.md Volumes ('nginx has separate locations for it and for volume content'): a regex location nested in the prefix serves only <meetingId>/<token>/learning_dashboard_data.json from bbb-data, where bbb-web writes it (LearningDashboardService.java:34,40,96 @ 35cad46a9f)"
