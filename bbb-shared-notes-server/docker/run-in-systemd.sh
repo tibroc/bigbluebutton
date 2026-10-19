@@ -25,9 +25,13 @@
 #
 # MemoryHigh/MemoryMax need cgroups; the memory limit of the service applies instead (an
 # address-space limit, ulimit -v, makes wkhtmltopdf's WebKit crash at start). ProtectSystem,
-# ProtectHome, PrivateTmp and the mount syscall filter are covered by the container: the image
-# is root-owned, the service runs without privileges, and only /tmp and the rendered config are
+# ProtectHome and the mount syscall filter are covered by the container: the image is
+# root-owned, the service runs without privileges, and only /tmp and the rendered config are
 # writable.
+#
+#   PrivateTmp=true             a directory of its own per run below BBB_BLOCKNOTE_DIR (mode
+#                               0700), removed afterwards: TMPDIR, XDG_RUNTIME_DIR and
+#                               XDG_CACHE_HOME of the command
 
 set -euo pipefail
 
@@ -43,4 +47,14 @@ timeout_secs="$1"; shift
 cd "$BBB_BLOCKNOTE_DIR"
 umask 0022
 
-exec no-network --write "$BBB_BLOCKNOTE_DIR" timeout --kill-after=10s "${timeout_secs}" "$@"
+run_tmp="$(mktemp -d "${BBB_BLOCKNOTE_DIR%/}/.run-XXXXXXXX")"
+trap 'rm -rf -- "$run_tmp"' EXIT
+trap 'exit 143' TERM HUP
+trap 'exit 130' INT
+mkdir "$run_tmp/tmp" "$run_tmp/runtime" "$run_tmp/cache"
+chmod 0700 "$run_tmp/runtime"
+
+status=0
+TMPDIR="$run_tmp/tmp" XDG_RUNTIME_DIR="$run_tmp/runtime" XDG_CACHE_HOME="$run_tmp/cache" \
+  no-network --write "$BBB_BLOCKNOTE_DIR" timeout --kill-after=10s "${timeout_secs}" "$@" || status=$?
+exit "$status"
