@@ -30,6 +30,11 @@ concurrency:
 env:
   CONTAINER_ENGINE: docker
 
+# bash --noprofile --norc -eo pipefail {0}: a failing command in a pipeline fails the step.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   contract:
     name: Configuration contract
@@ -101,7 +106,7 @@ jobs:
             esac
           done < <(git ls-files -- 'docker/**' '*/docker/**' \
             ':!docker/tests/golden/*/expected/**' ':!docker/tests/parity/reference/**')
-          shellcheck --version | head -n 2
+          shellcheck --version | sed -n '1,2p'
           echo "${#scripts[@]} scripts"
           shellcheck -x --severity=warning "${scripts[@]}"
 
@@ -250,3 +255,116 @@ jobs:
           fi
           echo "service: ${service:-none}; check.sh ${args[*]} $IMAGE_REF"
           docker/tests/uid/check.sh "${args[@]}" "$IMAGE_REF"
+
+      # For the stack job: the image this job built and checked, as a docker archive. Not every
+      # image is in the stack (setup is a profile of its own), but they are few MB to a few
+      # hundred MB compressed and the list stays in one place: bake's default group.
+      - name: Save the image for the stack test
+        run: docker save "$IMAGE_REF" | gzip -1 > "$RUNNER_TEMP/$IMAGE_NAME.tar.gz"
+
+      - name: Upload the image for the stack test
+        uses: actions/upload-artifact@v4
+        with:
+          name: stack-image-${{ matrix.image }}
+          path: ${{ runner.temp }}/${{ matrix.image }}.tar.gz
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: true
+
+  # The stack of docker-compose.yml on the runner's Docker Engine, with the images the jobs above
+  # built (loaded from their artifacts: rebuilding them here would build again every image a pull
+  # request changes, as the BuildKit cache is read-only for pull requests, and would not test the
+  # images the other jobs checked). Same steps as docker/README.md, "Testing the stack with
+  # Docker Engine", with `dind.sh --host` in place of the Engine container.
+  stack:
+    name: Stack (join path, restarts, checks)
+    needs: image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      BBB_IMAGE_TAG: golden
+    steps:
+      - uses: actions/checkout@v5
+
+      # The fixture values are public test values (docker/tests/stack/fixture.env); masked
+      # anyway, so that a log never shows a secret in clear.
+      - name: Mask the fixture secrets
+        run: |
+          grep -E '^[A-Z0-9_]+(SECRET|PASSWORD|KEY)=' docker/tests/stack/fixture.env | cut -d= -f2- |
+            while IFS= read -r value; do echo "::add-mask::$value"; done
+
+      # About 9 GB of loaded images (collabora/code about 1.5 GB of them) and the stack's
+      # volumes: removes preinstalled toolchains the job does not use.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Download the images
+        timeout-minutes: 15
+        uses: actions/download-artifact@v4
+        with:
+          pattern: stack-image-*
+          path: ${{ runner.temp }}/images
+          merge-multiple: true
+
+      - name: Load the images
+        id: load
+        timeout-minutes: 15
+        run: |
+          for f in "$RUNNER_TEMP"/images/*.tar.gz; do
+            gzip -dc "$f" | docker load -q
+            rm -f "$f"
+          done
+          docker image ls --format '{{.Repository}}:{{.Tag}} {{.Size}}'
+          df -h /
+
+      # Test certificate, then docker compose up -d --wait (certbot scaled to 0, no ACME request).
+      # Pulls the images pinned by digest (redis, collabora/code, webhooks).
+      - name: Start the stack
+        id: up
+        timeout-minutes: 15
+        run: |
+          docker/tests/stack/dind.sh --host start
+          docker/tests/stack/dind.sh --host up
+
+      - name: Join path with restart cycles
+        if: ${{ !cancelled() && steps.up.outcome == 'success' }}
+        timeout-minutes: 30
+        run: docker/tests/stack/dind.sh --host test
+
+      - name: Effective configuration
+        if: ${{ !cancelled() && steps.up.outcome == 'success' }}
+        timeout-minutes: 5
+        run: docker/tests/stack/dind.sh --host config
+
+      - name: Webhooks
+        if: ${{ !cancelled() && steps.up.outcome == 'success' }}
+        timeout-minutes: 5
+        run: docker/tests/stack/dind.sh --host webhooks run --auth bearer
+
+      - name: Office conversion
+        if: ${{ !cancelled() && steps.up.outcome == 'success' }}
+        timeout-minutes: 10
+        run: docker/tests/stack/dind.sh --host conversion
+
+      - name: Shared notes PDF converter
+        if: ${{ !cancelled() && steps.load.outcome == 'success' }}
+        timeout-minutes: 5
+        run: docker/tests/stack/notes-pdf-check.sh --docker docker "localhost/bbb-shared-notes:$BBB_IMAGE_TAG"
+
+      - name: Collect diagnostics
+        if: ${{ failure() }}
+        run: docker/tests/stack/dind.sh --host diagnostics "$RUNNER_TEMP/stack-diagnostics"
+
+      - name: Upload diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: stack-diagnostics
+          path: ${{ runner.temp }}/stack-diagnostics
+          retention-days: 7
+          if-no-files-found: ignore

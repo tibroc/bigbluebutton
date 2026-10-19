@@ -4,7 +4,15 @@
 # DNS, tmpfs mounted noexec, `configs:`, restart behaviour), so the stack is tested with the
 # Engine the deployment uses.
 #
-# Usage: docker/tests/stack/dind.sh COMMAND [ARG...]
+# Usage: docker/tests/stack/dind.sh [--host] COMMAND [ARG...]
+#
+#   --host             use the Docker Engine of this host (the `docker` CLI, DOCKER_HOST if
+#                      set) instead of the Engine container, for example in CI
+#                      (docker-checks.yml, job "Stack"); the repository is used where it is.
+#                      `start` only checks the Engine, `load` is not available (load or pull
+#                      the images yourself), `stop` runs `docker compose down -v` and removes
+#                      the test certificate's volumes. podman is not needed. The stack's ports
+#                      (80/tcp, 443/tcp, 7882/udp, 3478/udp and tcp) are published on this host.
 #
 #   start              start the Docker Engine container (idempotent)
 #   load [IMAGE...]    copy images from podman into the Engine; default: every image of the
@@ -19,6 +27,9 @@
 #   conversion [ARG...] docker/tests/stack/conversion-check.sh against the stack's conversion
 #                      service, with bbb-web as the client (ARGs passed on)
 #   config [ARG...]    docker/tests/stack/config-check.sh against the stack (ARGs passed on)
+#   diagnostics DIR    write `docker compose ps -a` and the logs of every service of the
+#                      stack to DIR (created), with the values of the secrets of fixture.env
+#                      replaced by `[redacted NAME]`
 #   compose ARG...     docker compose ARG... for the stack
 #   docker ARG...      docker ARG... in the Engine
 #   stop               remove the Engine container and its volume (the stack with it)
@@ -27,6 +38,12 @@
 #   DIND_NAME          name of the podman container (default bbb-dind); its image store and
 #                      volumes are in the podman volume DIND_NAME-data
 #   BBB_IMAGE_TAG      tag of the BBB images (default 4.0.1)
+#   DIND_SOCKET_DIR    `start` only: an existing directory of this host (absolute path, no `:`;
+#                      applies when the Engine container is started) where the Engine also
+#                      serves its API (DIR/docker.sock), so that the `docker` CLI of this host
+#                      can use it (DOCKER_HOST=unix://DIR/docker.sock, with --host). Keep the
+#                      path short (a socket path has at most 107 bytes) and the directory
+#                      private (mode 0700): the socket gives full control of the Engine.
 #
 # The Engine runs in a privileged podman container (rootless podman: privileged within the user
 # namespace only) with the repository mounted read-only at /src. The stack uses
@@ -54,17 +71,35 @@ TAG="${BBB_IMAGE_TAG:-4.0.1}"
 usage() { sed -n '2,/^$/{s/^# \{0,1\}//;p}' "$0" >&2; exit 2; }
 die() { echo "dind.sh: $*" >&2; exit 2; }
 
+host=0
+if [ "${1:-}" = --host ]; then host=1; shift; fi
+
 [[ "$NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "invalid DIND_NAME: $NAME"
 [[ "$TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || die "invalid BBB_IMAGE_TAG: $TAG"
-command -v podman >/dev/null 2>&1 || die "podman not found"
 
-running() { [ "$(podman inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null || true)" = true ]; }
-require_running() { running || die "the Engine container $NAME is not running (dind.sh start)"; }
+if [ "$host" -eq 1 ]; then
+    command -v docker >/dev/null 2>&1 || die "docker not found"
+    # The commands below are passed to the test scripts as strings and split at blanks.
+    [[ "$REPO" =~ ^[A-Za-z0-9_./-]+$ ]] || die "--host: the repository path has unsupported characters: $REPO"
+    SRC="$REPO"
+    running() { docker info >/dev/null 2>&1; }
+    require_running() { running || die "the Docker Engine of this host is not reachable (docker info)"; }
+    # in_engine ARG...: run ARG... on this host, with the image tag of the stack.
+    in_engine() { BBB_IMAGE_TAG="$TAG" "$@"; }
+    DOCKER_CMD="docker"
+    COMPOSE_PREFIX="env BBB_IMAGE_TAG=$TAG docker compose"
+else
+    command -v podman >/dev/null 2>&1 || die "podman not found"
+    SRC=/src
+    running() { [ "$(podman inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null || true)" = true ]; }
+    require_running() { running || die "the Engine container $NAME is not running (dind.sh start)"; }
+    # in_engine ARG...: run ARG... in the Engine container, stdin attached.
+    in_engine() { podman exec -i -e BBB_IMAGE_TAG="$TAG" "$NAME" "$@"; }
+    DOCKER_CMD="podman exec -i $NAME docker"
+    COMPOSE_PREFIX="podman exec -i -e BBB_IMAGE_TAG=$TAG $NAME docker compose"
+fi
 
-# in_engine ARG...: run ARG... in the Engine container, stdin attached.
-in_engine() { podman exec -i -e BBB_IMAGE_TAG="$TAG" "$NAME" "$@"; }
-
-COMPOSE_ARGS="--project-directory /src -f /src/docker-compose.yml -f /src/docker/tests/stack/compose.test.yml --env-file /src/docker/tests/stack/fixture.env"
+COMPOSE_ARGS="--project-directory $SRC -f $SRC/docker-compose.yml -f $SRC/docker/tests/stack/compose.test.yml --env-file $SRC/docker/tests/stack/fixture.env"
 
 compose() {
     # shellcheck disable=SC2086 # COMPOSE_ARGS is a fixed list of words without spaces
@@ -121,15 +156,32 @@ install_certificate() {
 }
 
 start() {
+    if [ "$host" -eq 1 ]; then
+        require_running
+        docker version
+        return
+    fi
+    if [ -n "${DIND_SOCKET_DIR:-}" ]; then
+        [[ "$DIND_SOCKET_DIR" == /* && "$DIND_SOCKET_DIR" != *:* ]] \
+            || die "DIND_SOCKET_DIR must be an absolute path without ':': $DIND_SOCKET_DIR"
+    fi
     if running; then
         echo "Engine container $NAME is running"
+        [ -z "${DIND_SOCKET_DIR:-}" ] || echo "dind.sh: DIND_SOCKET_DIR ignored: $NAME is already running (stop it first to serve the socket)" >&2
     else
         podman rm -f "$NAME" >/dev/null 2>&1 || true
+        local socket_args=() dockerd_args=()
+        if [ -n "${DIND_SOCKET_DIR:-}" ]; then
+            [ -d "$DIND_SOCKET_DIR" ] || die "DIND_SOCKET_DIR is not a directory: $DIND_SOCKET_DIR"
+            socket_args=(-v "$DIND_SOCKET_DIR:/run/dind-host")
+            # added to the entrypoint's default --host options
+            dockerd_args=(--host=unix:///run/dind-host/docker.sock)
+        fi
         echo "starting Docker Engine container $NAME"
         # label=disable: SELinux hosts let the Engine read the repository unrelabelled.
         podman run -d --name "$NAME" --privileged --security-opt label=disable \
-            -v "$NAME-data:/var/lib/docker" -v "$REPO:/src:ro" \
-            "$DIND_IMAGE" >/dev/null
+            -v "$NAME-data:/var/lib/docker" -v "$REPO:/src:ro" "${socket_args[@]}" \
+            "$DIND_IMAGE" "${dockerd_args[@]}" >/dev/null
     fi
     for _ in $(seq 60); do
         in_engine docker info >/dev/null 2>&1 && break
@@ -137,6 +189,25 @@ start() {
     done
     in_engine docker info >/dev/null 2>&1 || { podman logs "$NAME" >&2; die "dockerd did not start"; }
     in_engine docker version
+}
+
+# diagnostics DIR: `docker compose ps -a` and the logs of each service into DIR, with the values
+# of the secrets of fixture.env (names ending in SECRET, PASSWORD or KEY) replaced. Fixture values
+# only, but they are still not published as they are.
+diagnostics() {
+    local dir="$1" scrub=() name value svc
+    mkdir -p "$dir"
+    while IFS='=' read -r name value; do
+        [[ "$name" =~ (SECRET|PASSWORD|KEY)$ ]] && [ -n "$value" ] || continue
+        # sed pattern: the value with the characters special in a basic regular expression escaped
+        scrub+=(-e "s/$(printf '%s' "$value" | sed 's/[][\\/.*^$]/\\&/g')/[redacted $name]/g")
+    done < <(grep -E '^[A-Z0-9_]+=' "$HERE/fixture.env")
+    [ "${#scrub[@]}" -gt 0 ] || die "no secret found in fixture.env"
+    compose ps -a 2>&1 | sed "${scrub[@]}" >"$dir/ps.txt" || true
+    while IFS= read -r svc; do
+        compose logs --no-color --timestamps "$svc" 2>&1 | sed "${scrub[@]}" >"$dir/$svc.log" || true
+    done < <(compose config --services)
+    ls -l "$dir"
 }
 
 load() {
@@ -164,7 +235,7 @@ load() {
 up() {
     require_running
     test_pki
-    compose up --no-start --scale certbot=0
+    compose up --no-start --quiet-pull --scale certbot=0
     install_certificate
     # --wait: returns once every service is running and healthy (db-init: exited 0). nginx
     # follows recreated upstreams by itself (docker/README.md, "nginx follows restarted services").
@@ -175,35 +246,43 @@ up() {
 cmd="$1"; shift
 case "$cmd" in
     start) start ;;
-    load) load "$@" ;;
+    load) [ "$host" -eq 0 ] || die "load: not available with --host"; load "$@" ;;
     up) up "$@" ;;
     test)
         require_running
         BBB_SHARED_SECRET="$(sed -n 's/^BBB_SHARED_SECRET=//p' "$HERE/fixture.env")" \
-            "$HERE/join-path.sh" --insecure --docker "podman exec -i $NAME docker" \
-            --compose "podman exec -i -e BBB_IMAGE_TAG=$TAG $NAME docker compose $COMPOSE_ARGS" \
+            "$HERE/join-path.sh" --insecure --docker "$DOCKER_CMD" \
+            --compose "$COMPOSE_PREFIX $COMPOSE_ARGS" \
             --client-image "localhost/bbb-graphql-actions:$TAG" "$@"
         ;;
     webhooks)
         require_running
         BBB_SHARED_SECRET="$(sed -n 's/^BBB_SHARED_SECRET=//p' "$HERE/fixture.env")" \
-            "$HERE/webhooks-check.sh" "$@" --docker "podman exec -i $NAME docker" \
+            "$HERE/webhooks-check.sh" "$@" --docker "$DOCKER_CMD" \
             --image "localhost/bbb-graphql-actions:$TAG"
         ;;
     config)
         require_running
         "$HERE/config-check.sh" \
-            --compose "podman exec -i -e BBB_IMAGE_TAG=$TAG $NAME docker compose $COMPOSE_ARGS" "$@"
+            --compose "$COMPOSE_PREFIX $COMPOSE_ARGS" "$@"
         ;;
     conversion)
         require_running
-        "$HERE/conversion-check.sh" --docker "podman exec -i $NAME docker" \
+        "$HERE/conversion-check.sh" --docker "$DOCKER_CMD" \
             --listener-image "localhost/bbb-graphql-actions:$TAG" --client-image "localhost/bbb-web:$TAG" \
-            --stack "podman exec -i -e BBB_IMAGE_TAG=$TAG $NAME docker compose $COMPOSE_ARGS" "$@"
+            --stack "$COMPOSE_PREFIX $COMPOSE_ARGS" "$@"
         ;;
+    diagnostics) [ $# -eq 1 ] || usage; require_running; diagnostics "$1" ;;
     compose) require_running; compose "$@" ;;
     docker) require_running; in_engine docker "$@" ;;
     stop)
+        if [ "$host" -eq 1 ]; then
+            require_running
+            compose --profile '*' down -v --remove-orphans
+            docker volume rm -f "$PKI_VOLUME" "$TRUSTSTORE_VOLUME" >/dev/null
+            echo "removed the stack, its volumes and $PKI_VOLUME $TRUSTSTORE_VOLUME"
+            exit 0
+        fi
         podman rm -f "$NAME" >/dev/null 2>&1 || true
         podman volume rm -f "$NAME-data" >/dev/null 2>&1 || true
         echo "removed $NAME and its volume $NAME-data"

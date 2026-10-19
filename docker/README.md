@@ -359,8 +359,18 @@ docker/tests/stack/dind.sh conversion   # conversion-check.sh against the stack'
 docker/tests/stack/dind.sh config    # effective configuration of bbb-webrtc-sfu and webhooks
 docker/tests/stack/dind.sh webhooks run --auth bearer   # callbacks of a registered hook
 docker/tests/stack/dind.sh compose logs akka-apps   # any docker compose command
+docker/tests/stack/dind.sh diagnostics DIR   # compose ps and every service's log, secrets redacted
 docker/tests/stack/dind.sh stop      # removes the Engine container and all its data
 ```
+
+On a host with Docker Engine, `dind.sh --host COMMAND` runs the same commands against that
+Engine (the `docker` CLI, `DOCKER_HOST` if set), with the repository where it is; the images
+must already be there (`load` is not available), and `stop` removes the stack, its volumes and
+the test certificate. The stack's ports (80/tcp, 443/tcp, 7882/udp, 3478/udp and tcp) are
+then published on that host, so they must be free there. CI runs it this way ([CI](#ci)). To run those steps on a podman-only host,
+start the Engine container with `DIND_SOCKET_DIR=<short private absolute directory>`: the Engine then
+also serves its API on `<dir>/docker.sock`, and a `docker` CLI on the host uses it with
+`DOCKER_HOST=unix://<dir>/docker.sock`.
 
 The stack runs with `docker/tests/stack/fixture.env` (fixture values, `bbb.example.com`;
 certbot is scaled to 0, so no ACME request is made). In its place, `up` issues a certificate for
@@ -513,7 +523,16 @@ Dockerfiles, `docker-bake.hcl`, `docker-compose.yml` or the contract outputs, in
 | Golden runner tests | `docker/tests/golden/run.sh` |
 | Compose file | `docker/tests/compose/run.sh`, then `assert-compose.sh` on `docker-compose.yml` for every feature combination |
 | Lint | `docker/tests/lint/run.sh` on the Dockerfiles the pull request changes (all of them when `docker/.hadolint.yaml` changes or on manual runs); shellcheck at severity warning on the scripts below `docker/` and `*/docker/`, including those without a `.sh` suffix |
-| Image `bbb-<image>` (one per bake target, amd64) | build with BuildKit, tagged `localhost/bbb-<image>:golden` and loaded into Docker; `docker/tests/dirmodes/check.sh`; `docker/tests/golden/run-golden.sh --engine docker --parity` for the golden cases of that image; `docker/tests/uid/check.sh` with the fixture env of its golden case, a write probe for each tmpfs and each writable named volume of its service in `docker-compose.yml` (`--no-render` for images without a golden case) |
+| Image `bbb-<image>` (one per bake target, amd64) | build with BuildKit, tagged `localhost/bbb-<image>:golden` and loaded into Docker; `docker/tests/dirmodes/check.sh`; `docker/tests/golden/run-golden.sh --engine docker --parity` for the golden cases of that image; `docker/tests/uid/check.sh` with the fixture env of its golden case, a write probe for each tmpfs and each writable named volume of its service in `docker-compose.yml` (`--no-render` for images without a golden case); the image saved for the stack job |
+| Stack (after all image jobs) | the stack of `docker-compose.yml` on the runner's Docker Engine with the images of the image jobs (`docker save` there, uploaded as artifacts `stack-image-bbb-<image>` kept for one day, loaded here), as in [Testing the stack](#testing-the-stack-with-docker-engine) with `dind.sh --host`: `up`, `test` (join path and the four restart cycles), `config`, `webhooks run --auth bearer`, `conversion`, and `notes-pdf-check.sh`. On failure, `dind.sh --host diagnostics` output (`docker compose ps -a`, the log of every service, fixture secrets redacted) is uploaded as the artifact `stack-diagnostics` |
+
+The stack job loads the images the image jobs built and checked rather than building them
+again: the BuildKit cache is read-only for pull requests, so a rebuild would repeat the build of
+every image the pull request changes. The archives are about 2 GB (gzip, deleted once loaded);
+the loaded images, collabora/code, redis and webhooks included, about 9 GB (`docker system df`,
+Docker Engine 29.9.1 with its default image store). So the job first removes preinstalled
+toolchains it does not use (.NET, Android, GHC, CodeQL). The fixture secrets are
+masked in the job's log.
 
 `shellcheck.yml` (upstream) also checks every `*.sh` file of the repository at severity error.
 Images that are neither in `docker-compose.yml` nor in a golden case (record-and-playback until
