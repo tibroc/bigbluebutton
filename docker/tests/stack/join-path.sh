@@ -13,6 +13,8 @@
 #   --client-image IMG   image with Node 24 for the client part (default
 #                        localhost/bbb-graphql-actions:4.0.1)
 #   --no-restart         skip the restart cycles
+#   --skip-service NAME  do not wait for service NAME to be healthy (for example a stopped
+#                        optional service); may be repeated
 #   --keep-going         go on with the restart cycles after failed client steps
 #   --wait SECONDS       how long the services may take to become healthy (default 300; the
 #                        longest start_period in docker-compose.yml is 200 s)
@@ -23,14 +25,16 @@
 # Steps: stack-healthy, then the client steps of join-path-client.mjs (api-index, create, join,
 # html5client, meetingStaticData, html5client-assets, graphql-ws, user-join, learning-dashboard,
 # default-presentation, upload-presentation, livekit); then restart (`docker compose restart`),
-# stack-healthy-after-restart, nginx restarted as docker/README.md requires, and the client
-# steps again; then restart-redis (the redis container recreated alone, with a new address
-# unless its address is fixed), stack-healthy-after-redis, nginx restarted, and the client
-# steps again; then
-# restart-redis-late (every other service restarted while redis is stopped, redis started 20 s
-# later), stack-healthy-after-redis-late, nginx restarted, and the client steps again. Prints
-# `STEP <name>: OK|FAIL ...`, then `JOIN-PATH PASS` or `JOIN-PATH FAIL`. Exit 0 PASS, 1 FAIL,
-# 2 usage error.
+# stack-healthy-after-restart and the client steps again; then restart-redis (the redis
+# container recreated alone, with a new address unless its address is fixed),
+# stack-healthy-after-redis and the client steps again; then restart-redis-late (every other
+# service restarted while redis is stopped, redis started 20 s later),
+# stack-healthy-after-redis-late and the client steps again; then restart-graphql-middleware
+# (recreated alone while its old address is kept taken, so it gets a new one),
+# stack-healthy-after-graphql-middleware and the client steps again. nginx is never restarted:
+# it re-resolves the names of the services it proxies to (docker/README.md, "nginx follows
+# restarted services"). Prints `STEP <name>: OK|FAIL ...`, then `JOIN-PATH PASS` or
+# `JOIN-PATH FAIL`. Exit 0 PASS, 1 FAIL, 2 usage error.
 #
 # The client runs in a container on the host network of the Docker Engine, where the stack
 # publishes 443 (with dind.sh: inside the Engine container). The shared secret goes to it on
@@ -56,6 +60,7 @@ wait_s=300
 redis_late_s=20
 settle_s=30
 timeout_s=30
+skip_services=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --domain) [ $# -ge 2 ] || usage; domain="$2"; shift 2 ;;
@@ -65,6 +70,7 @@ while [ $# -gt 0 ]; do
         --compose) [ $# -ge 2 ] || usage; compose_cmd="$2"; shift 2 ;;
         --client-image) [ $# -ge 2 ] || usage; client_image="$2"; shift 2 ;;
         --no-restart) restart=0; shift ;;
+        --skip-service) [ $# -ge 2 ] || usage; skip_services="$skip_services $2"; shift 2 ;;
         --keep-going) keep_going=1; shift ;;
         --wait) [ $# -ge 2 ] || usage; wait_s="$2"; shift 2 ;;
         --timeout) [ $# -ge 2 ] || usage; timeout_s="$2"; shift 2 ;;
@@ -89,7 +95,9 @@ wait_healthy() {
     local step="$1" start=$SECONDS pending lines
     while :; do
         lines="$(health)" || lines=""
-        pending="$(awk -F'|' '
+        pending="$(awk -F'|' -v skip="$skip_services" '
+            BEGIN { n = split(skip, s, " "); for (i = 1; i <= n; i++) skipped[s[i]] = 1 }
+            $1 in skipped { next }
             $2 == "exited" && $4 == 0 && $1 == "db-init" { next }
             $2 == "running" && ($3 == "healthy" || $3 == "") { next }
             { printf "%s%s:%s/%s", sep, $1, $2, ($3 == "" ? "-" : $3); sep = " " }
@@ -116,49 +124,39 @@ client() {
     printf '%s\n' "$secret" | "${DOCKER[@]}" "${args[@]}"
 }
 
-# restart_redis_alone: recreate the redis container alone; sets redis_detail. Its old address on
-# the `bbb` network is held by a placeholder container (the redis image, running sleep) while
-# the new container starts, unless the address is fixed (ipv4_address).
-restart_redis_alone() {
-    local cid net old fixed image
-    redis_detail="redis container not found"
-    cid="$("${COMPOSE[@]}" ps -q redis)" && [ -n "$cid" ] || return 1
+# recreate_alone SERVICE: recreate the container of SERVICE alone; sets alone_detail. Its old
+# address on the `bbb` network is held by a placeholder container (the service's image, running
+# sleep) while the new container starts, unless the address is fixed (ipv4_address).
+recreate_alone() {
+    local svc="$1" cid net old fixed image out
+    alone_detail="$svc container not found"
+    cid="$("${COMPOSE[@]}" ps -q "$svc")" && [ -n "$cid" ] || return 1
     # the network of the project named `bbb` (compose names it <project>_bbb)
     # shellcheck disable=SC2016 # a Go template, not a shell expansion
     net="$("${DOCKER[@]}" inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' "$cid" | grep -E '_bbb$' | head -n 1)"
     old="$("${DOCKER[@]}" inspect -f "{{(index .NetworkSettings.Networks \"$net\").IPAddress}}" "$cid")"
     fixed="$("${DOCKER[@]}" inspect -f "{{with (index .NetworkSettings.Networks \"$net\").IPAMConfig}}{{.IPv4Address}}{{end}}" "$cid")"
     image="$("${DOCKER[@]}" inspect -f '{{.Config.Image}}' "$cid")"
-    redis_detail="docker compose rm -s -f redis failed"
-    "${COMPOSE[@]}" rm -s -f redis >/dev/null 2>&1 || return 1
+    alone_detail="docker compose rm -s -f $svc failed"
+    "${COMPOSE[@]}" rm -s -f "$svc" >/dev/null 2>&1 || return 1
     if [ -z "$fixed" ]; then
-        redis_detail="cannot hold redis's old address $old on $net"
+        alone_detail="cannot hold $svc's old address $old on $net"
         "${DOCKER[@]}" run -d --rm --name join-path-address-holder --network "$net" --ip "$old" \
             --entrypoint sleep "$image" 600 >/dev/null 2>&1 || return 1
     fi
-    redis_detail="docker compose up -d redis failed"
-    "${COMPOSE[@]}" up -d redis >/dev/null 2>&1 || { "${DOCKER[@]}" rm -f join-path-address-holder >/dev/null 2>&1; return 1; }
+    if ! out="$("${COMPOSE[@]}" up -d --no-deps "$svc" 2>&1)"; then
+        alone_detail="docker compose up -d --no-deps $svc failed: $(tail -n 1 <<<"$out")"
+        "${DOCKER[@]}" rm -f join-path-address-holder >/dev/null 2>&1
+        return 1
+    fi
     [ -n "$fixed" ] || "${DOCKER[@]}" rm -f join-path-address-holder >/dev/null 2>&1 || true
-    cid="$("${COMPOSE[@]}" ps -q redis)"
-    redis_detail="redis recreated alone, address $old -> $("${DOCKER[@]}" inspect -f "{{(index .NetworkSettings.Networks \"$net\").IPAddress}}" "$cid")${fixed:+ (fixed)}"
+    cid="$("${COMPOSE[@]}" ps -q "$svc")"
+    alone_detail="$svc recreated alone, address $old -> $("${DOCKER[@]}" inspect -f "{{(index .NetworkSettings.Networks \"$net\").IPAddress}}" "$cid")${fixed:+ (fixed)}"
 }
 
 result() {
     echo "JOIN-PATH $1"
     [ "$1" = PASS ]
-}
-
-# restart_nginx SUFFIX: nginx resolves its upstreams once, at start, and restarted containers
-# come back with other addresses, so nginx is restarted once the others are healthy
-# (docker/README.md, "Restart nginx ..."; RB-04 runbook step 14).
-restart_nginx() {
-    if "${COMPOSE[@]}" restart nginx >/dev/null 2>&1; then
-        echo "STEP nginx-restart-$1: OK docker compose restart nginx"
-    else
-        echo "STEP nginx-restart-$1: FAIL docker compose restart nginx exited non-zero"
-        result FAIL; exit 1
-    fi
-    wait_healthy "stack-healthy-$1-nginx" || { result FAIL; exit 1; }
 }
 
 # client_steps: the client steps; with --keep-going a failure is remembered, not fatal.
@@ -178,27 +176,24 @@ if [ "$restart" -eq 1 ]; then
         result FAIL; exit 1
     fi
     wait_healthy stack-healthy-after-restart || { health | sed 's/^/  /; s/|/ /g'; result FAIL; exit 1; }
-    restart_nginx after-restart
     client_steps
 
     # redis alone. The other services stay up and must reconnect to it. Docker Engine 29 gives a
     # restarted or recreated container a new address unless the address is fixed, though not
     # every time; the round makes the change certain by keeping redis's old address taken while
     # redis is recreated (unless it has a fixed address). graphql-middleware and
-    # export-annotations exit without redis and are restarted by their restart policy, so nginx
-    # is restarted afterwards (docker/README.md).
-    if restart_redis_alone; then
-        echo "STEP restart-redis: OK $redis_detail"
+    # export-annotations exit without redis and are restarted by their restart policy.
+    if recreate_alone redis; then
+        echo "STEP restart-redis: OK $alone_detail"
         # graphql-middleware restarted with a new address. akka-apps calls it over HTTP (the
         # reconnection after a join) and keeps the address it resolved for 30 s (the JVM's
         # address cache, networkaddress.cache.ttl); a join in that time misses the reconnection.
         sleep "$settle_s"
     else
-        echo "STEP restart-redis: FAIL $redis_detail"
+        echo "STEP restart-redis: FAIL $alone_detail"
         result FAIL; exit 1
     fi
     wait_healthy stack-healthy-after-redis || { health | sed 's/^/  /; s/|/ /g'; result FAIL; exit 1; }
-    restart_nginx after-redis
     client_steps
 
     # `docker compose restart` restarts every service at once, in no particular order, so a
@@ -215,7 +210,20 @@ if [ "$restart" -eq 1 ]; then
         result FAIL; exit 1
     fi
     wait_healthy stack-healthy-after-redis-late || { health | sed 's/^/  /; s/|/ /g'; result FAIL; exit 1; }
-    restart_nginx after-redis-late
+    client_steps
+
+    # One of nginx's upstreams recreated alone with a new address (its old one kept taken), nginx
+    # untouched: nginx re-resolves the name (upstream group with `resolve`), so the join path
+    # passes through it again.
+    if recreate_alone graphql-middleware; then
+        echo "STEP restart-graphql-middleware: OK $alone_detail"
+        # akka-apps keeps graphql-middleware's old address for up to 30 s (see restart-redis).
+        sleep "$settle_s"
+    else
+        echo "STEP restart-graphql-middleware: FAIL $alone_detail"
+        result FAIL; exit 1
+    fi
+    wait_healthy stack-healthy-after-graphql-middleware || { health | sed 's/^/  /; s/|/ /g'; result FAIL; exit 1; }
     client_steps
 fi
 [ "$failed" -eq 0 ] || { result FAIL; exit 1; }
