@@ -313,7 +313,7 @@ Optional. Unset variables take the default shown.
 | [`BBB_GID`](#bbb_gid) | no | `998` | Group id belonging to BBB_UID. |
 | [`BBB_IMAGE_REGISTRY`](#bbb_image_registry) | no | `ghcr.io/bigbluebutton/bigbluebutton` | Registry and namespace of the BBB images (the repository's own namespace, so they never collide with the images the component repositories publish, e.g. ghcr.io/bigbluebutton/bbb-webrtc-sfu); compose uses `${BBB_IMAGE_REGISTRY}/bbb-<image>:${BBB_IMAGE_TAG}`. Set `localhost` to run images built locally with `docker buildx bake`, which tags them the same way. |
 | [`BBB_IMAGE_TAG`](#bbb_image_tag) | no | `4.0.1` | Tag of all BBB images (third-party images such as redis and postgres are pinned in the compose file). The default is the release the compose file belongs to; never `latest`. |
-| [`BBB_WEB_CONVERSION_URL`](#bbb_web_conversion_url) | no | — | URL of the office document conversion service that bbb-web calls (ADR-13). Unset means office document conversion is disabled (PDF and images still work). |
+| [`BBB_WEB_CONVERSION_URL`](#bbb_web_conversion_url) | no | `http://conversion:9980/cool/convert-to` | Base URL of the Collabora Online convert-to API that bbb-web calls for office documents (ADR-13); bbb-web appends the target format (`<URL>/pdf`). The compose default is the stack's own `conversion` service (collabora/code); another Collabora Online server (`https://<host>:9980/cool/convert-to`) works as well. Empty: office document conversion is disabled (PDF and images still work). The bbb-web image itself has no default: on Kubernetes or with plain `docker run`, set it explicitly. |
 | [`BBB_WEB_PAGE_TOKEN_SECRET`](#bbb_web_page_token_secret) | no | — | HMAC key for presentation page tokens (pageTokenSecret). Unset means BBB_SHARED_SECRET, as upstream. |
 | [`BBB_WEB_MAX_HEAP_SIZE`](#bbb_web_max_heap_size) | no | `384m` | Java heap size of bbb-web (initial and maximum), JVM size syntax. |
 | [`RECORDING_RAW_RETENTION_DAYS`](#recording_raw_retention_days) | no | `14` | Deletes the raw recording data of recordings published more than N days ago (upstream published_days); 0 disables it. Published recordings are kept. |
@@ -386,17 +386,19 @@ Tag of all BBB images (third-party images such as redis and postgres are pinned 
 
 ### BBB_WEB_CONVERSION_URL
 
-URL of the office document conversion service that bbb-web calls (ADR-13). Unset means office document conversion is disabled (PDF and images still work).
+Base URL of the Collabora Online convert-to API that bbb-web calls for office documents (ADR-13); bbb-web appends the target format (`<URL>/pdf`). The compose default is the stack's own `conversion` service (collabora/code); another Collabora Online server (`https://<host>:9980/cool/convert-to`) works as well. Empty: office document conversion is disabled (PDF and images still work). The bbb-web image itself has no default: on Kubernetes or with plain `docker run`, set it explicitly.
 
 - **Required:** no. **Secret:** no.
-- **Default:** none
+- **Default:** `http://conversion:9980/cool/convert-to`
 - **Format:** `https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?` (extended regular expression, whole value)
-- **Example:** `http://conversion:8080/convert`
+- **Example:** `https://collabora.example.com:9980/cool/convert-to`
 - **Used by:** bbb-web
 - **Status:** draft
-- **Note:** The default URL is fixed by the task that builds the conversion service; the example is illustrative. bbb-web selects the conversion script with presOfficeConversionExec.
+- **Note:** docker-compose.yml passes `${BBB_WEB_CONVERSION_URL-<default>}` (no colon), so an empty value in .env reaches bbb-web as empty. bbb-web selects convert-remote.sh with presOfficeConversionExec when the value is non-empty, and limits each conversion to officeToPdfConversionTimeout (60 s) and uploads to maxFileSizeUpload (30000000 bytes). Default service: human decision 2026-10-19 (T-058).
 - **Sources:**
   - `bigbluebutton-web/grails-app/conf/bigbluebutton.properties:44 @ 35cad46a9f` — presOfficeConversionExec
+  - `bigbluebutton-web/grails-app/conf/bigbluebutton.properties:63,184 @ 35cad46a9f` — maxFileSizeUpload, officeToPdfConversionTimeout
+  - `bbb-libreoffice/assets/convert-cool.sh:9,49 @ 35cad46a9f` — collabora/code, /cool/convert-to/\<format\>, field data, port 9980
   - `bbb-libreoffice/assets/convert-remote.sh:30 @ 35cad46a9f` — upstream HTTP sample with a hard-coded endpoint
 
 ### BBB_WEB_PAGE_TOKEN_SECRET
