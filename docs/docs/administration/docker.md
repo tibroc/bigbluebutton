@@ -86,22 +86,17 @@ git checkout <release>
 
 ### 2. Create `.env`
 
-A setup container will generate `.env` for you (secrets, detected public addresses). Until it
-is available, create `.env` from `.env.sample` by hand:
+Let the setup container write `.env`. It starts from `.env.sample`, generates every secret,
+asks for the server's name, its public IPv4 address and the e-mail address for Let's Encrypt, and
+never overwrites a value that is already set, so you can run it again after an upgrade:
 
 ```bash
-install -m 600 .env.sample .env
+docker compose run --rm setup
 ```
 
-Fill in every value of `.env.sample` marked **Required**: `BBB_DOMAIN`, `BBB_PUBLIC_IPV4`,
-`ACME_EMAIL` and the secrets. Also add the four PostgreSQL role passwords, which the images
-require as well: `POSTGRES_BBB_CORE_PASSWORD`, `POSTGRES_HASURA_APP_PASSWORD`,
-`POSTGRES_BBB_HASURA_PASSWORD` and `POSTGRES_BLOCKNOTE_PASSWORD`. Generate each secret
-separately, for example with
-
-```bash
-openssl rand -hex 32
-```
+It runs without network access. To fill `.env` by hand instead, copy `.env.sample`
+(`install -m 600 .env.sample .env`), fill in every value marked **Required** and generate each
+secret separately, for example with `openssl rand -hex 32`.
 
 `LIVEKIT_API_KEY` takes 8 to 64 letters and digits (`openssl rand -hex 8`). Every variable, its
 format and its default is listed in the

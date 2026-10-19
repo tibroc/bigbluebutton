@@ -195,7 +195,7 @@ services:
     environment:
       BBB_DOMAIN: ${BBB_DOMAIN}
       BBB_SHARED_SECRET: ${BBB_SHARED_SECRET}
-      POSTGRES_BBB_CORE_PASSWORD: ${POSTGRES_BBB_CORE_PASSWORD:-}
+      POSTGRES_BBB_CORE_PASSWORD: ${POSTGRES_BBB_CORE_PASSWORD}
     read_only: true
     tmpfs:
       - /tmp
@@ -224,8 +224,8 @@ services:
     restart: unless-stopped
     environment:
       HASURA_ADMIN_SECRET: ${HASURA_ADMIN_SECRET}
-      POSTGRES_HASURA_APP_PASSWORD: ${POSTGRES_HASURA_APP_PASSWORD:-}
-      POSTGRES_BBB_HASURA_PASSWORD: ${POSTGRES_BBB_HASURA_PASSWORD:-}
+      POSTGRES_HASURA_APP_PASSWORD: ${POSTGRES_HASURA_APP_PASSWORD}
+      POSTGRES_BBB_HASURA_PASSWORD: ${POSTGRES_BBB_HASURA_PASSWORD}
     read_only: true
     tmpfs:
       # exec: the hasura CLI (HOME=/tmp) unpacks its cli-ext helper below /tmp/.hasura and runs it
@@ -289,7 +289,7 @@ services:
     image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton/bigbluebutton}/bbb-shared-notes:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
     environment:
-      POSTGRES_BLOCKNOTE_PASSWORD: ${POSTGRES_BLOCKNOTE_PASSWORD:-}
+      POSTGRES_BLOCKNOTE_PASSWORD: ${POSTGRES_BLOCKNOTE_PASSWORD}
     read_only: true
     tmpfs:
       - /tmp
@@ -388,10 +388,10 @@ services:
       org.bigbluebutton.run-only: "true"
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_BBB_CORE_PASSWORD: ${POSTGRES_BBB_CORE_PASSWORD:-}
-      POSTGRES_HASURA_APP_PASSWORD: ${POSTGRES_HASURA_APP_PASSWORD:-}
-      POSTGRES_BBB_HASURA_PASSWORD: ${POSTGRES_BBB_HASURA_PASSWORD:-}
-      POSTGRES_BLOCKNOTE_PASSWORD: ${POSTGRES_BLOCKNOTE_PASSWORD:-}
+      POSTGRES_BBB_CORE_PASSWORD: ${POSTGRES_BBB_CORE_PASSWORD}
+      POSTGRES_HASURA_APP_PASSWORD: ${POSTGRES_HASURA_APP_PASSWORD}
+      POSTGRES_BBB_HASURA_PASSWORD: ${POSTGRES_BBB_HASURA_PASSWORD}
+      POSTGRES_BLOCKNOTE_PASSWORD: ${POSTGRES_BLOCKNOTE_PASSWORD}
     read_only: true
     tmpfs:
       - /tmp
