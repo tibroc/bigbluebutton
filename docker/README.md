@@ -291,8 +291,9 @@ services are healthy and repeats the join path, without restarting nginx (see ab
 `docker/tests/stack/notes-pdf-check.sh` checks the PDF converter of the shared-notes image on
 its own: like the bare-metal unit (`PrivateNetwork=true`, `IPAddressDeny=any`), wkhtmltopdf runs
 without network access (`no-network`, a seccomp filter that needs no privileges), no address is
-reachable from the page it converts, the server's own port included, and an export still
-produces a PDF:
+reachable from the page it converts, the server's own port included; where the kernel offers
+Landlock, it writes only to its work directory and cannot open the memory of other processes;
+and an export still produces a PDF:
 `docker/tests/stack/notes-pdf-check.sh --docker "podman exec -i bbb-dind docker" localhost/bbb-shared-notes:4.0.1`
 (or `--docker podman`).
 

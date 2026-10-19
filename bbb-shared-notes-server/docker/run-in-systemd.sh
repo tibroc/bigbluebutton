@@ -17,12 +17,17 @@
 #   IPAddressDeny=any           and everything it starts cannot create sockets, so it reaches no
 #                               address, loopback included. It needs no privileges; if it cannot
 #                               set up the restriction, the command does not run.
+#   ReadWritePaths=, NoNewPrivileges=true
+#                               no-network --write BBB_BLOCKNOTE_DIR: where the kernel offers
+#                               Landlock, the command writes only there (and /dev/null) and cannot
+#                               trace or open the memory of processes outside its own; it runs
+#                               with no_new_privs
 #
 # MemoryHigh/MemoryMax need cgroups; the memory limit of the service applies instead (an
 # address-space limit, ulimit -v, makes wkhtmltopdf's WebKit crash at start). ProtectSystem,
-# ProtectHome, PrivateTmp, NoNewPrivileges and the mount syscall filter are covered by the
-# container: the image is root-owned, the service runs without privileges, and only /tmp and
-# the rendered config are writable.
+# ProtectHome, PrivateTmp and the mount syscall filter are covered by the container: the image
+# is root-owned, the service runs without privileges, and only /tmp and the rendered config are
+# writable.
 
 set -euo pipefail
 
@@ -38,4 +43,4 @@ timeout_secs="$1"; shift
 cd "$BBB_BLOCKNOTE_DIR"
 umask 0022
 
-exec no-network timeout --kill-after=10s "${timeout_secs}" "$@"
+exec no-network --write "$BBB_BLOCKNOTE_DIR" timeout --kill-after=10s "${timeout_secs}" "$@"

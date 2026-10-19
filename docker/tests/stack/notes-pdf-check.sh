@@ -21,8 +21,14 @@
 #                (src/express/handlers/exportDocumentToPdf.ts): no request arrives
 #   socket       a TCP connection to 127.0.0.1:8787 through the runner fails with EACCES; the
 #                process runs with NoNewPrivs and a seccomp filter
-#   fds          a parent holding a listening socket (as node does) passes no socket to the
-#                command it starts through the runner, other than its stdio pipes
+#   fds          a parent holding a listening socket and an established connection (as node
+#                does) passes no socket to the command it starts through the runner, other than
+#                its stdio pipes
+#   isolation    a command started through the runner by a parent (as node starts it) cannot
+#                open the parent's /proc/<pid>/mem for writing, whatever the host's ptrace policy,
+#                and cannot write outside BBB_BLOCKNOTE_DIR, but can write inside it (Landlock;
+#                fails on a kernel without Landlock where the ptrace policy allows the access).
+#                Also shown, not checked: whether it can signal the parent (Landlock ABI 6)
 #   export       a page without external references through the runner: exit 0 and a PDF of
 #                one A4 page
 #
@@ -121,15 +127,36 @@ else step socket "FAIL connect 127.0.0.1:8787: $out"; fi
 
 # fds
 out="$(node -e '
-  const srv = require("node:net").createServer().listen(18081, "127.0.0.1", () => {
-    require("node:child_process").exec(`${process.argv[1]} 10 sh -c "ls -l /proc/self/fd/"`, (e, so, se) => {
-      // 0-2 are the stdio pipes node creates for the command (socket pairs to node itself).
-      console.log(e ? `error ${e.message}` : so.split("\n").filter((l) => / ([3-9]|[1-9][0-9]+) -> socket:/.test(l)).length + " socket(s)");
-      srv.close();
+  const net = require("node:net");
+  const srv = net.createServer().listen(18081, "127.0.0.1", () => {
+    const conn = net.connect(18081, "127.0.0.1", () => {
+      require("node:child_process").exec(`${process.argv[1]} 10 sh -c "ls -l /proc/self/fd/"`, (e, so) => {
+        // 0-2 are the stdio pipes node creates for the command (socket pairs to node itself).
+        console.log(e ? `error ${e.message}` : so.split("\n").filter((l) => / ([3-9]|[1-9][0-9]+) -> socket:/.test(l)).length + " socket(s)");
+        conn.destroy(); srv.close();
+      });
     });
   });' "$runner" 2>&1)"
-if [ "$out" = "0 socket(s)" ]; then step fds "OK the command inherits $out besides stdio"
+if [ "$out" = "0 socket(s)" ]; then step fds "OK the command inherits $out besides stdio (parent: listener + connection)"
 else step fds "FAIL the command inherits $out"; fi
+
+# isolation
+scope="$(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null || echo none)"
+# shellcheck disable=SC2016 # expanded by the inner sh
+probe='(exec 3<>"/proc/$1/mem") 2>/dev/null && echo mem=opened || echo mem=denied
+(echo x >/tmp/outside.txt) 2>/dev/null && echo outside=written || echo outside=denied
+(echo x >"$2/inside.txt") 2>/dev/null && echo inside=written || echo inside=denied
+kill -0 "$1" 2>/dev/null && echo signal=allowed || echo signal=denied'
+out="$(node -e '
+  const { execFile } = require("node:child_process");
+  execFile(process.argv[1], ["10", "sh", "-c", process.argv[2], "sh", String(process.pid), process.argv[3]],
+    (e, so, se) => console.log(e ? `error ${e.message} ${se}` : so.trim().split("\n").join(" ")));' \
+    "$runner" "$probe" "$dir" 2>&1)"
+case "$out" in
+    "mem=denied outside=denied inside=written signal="*) step isolation "OK $out (Yama ptrace_scope $scope)" ;;
+    *) step isolation "FAIL $out (Yama ptrace_scope $scope)" ;;
+esac
+rm -f /tmp/outside.txt
 
 # export
 printf '<html><head><meta charset="utf-8"></head><body><h1>Shared notes</h1><p>%s</p></body></html>\n' \
