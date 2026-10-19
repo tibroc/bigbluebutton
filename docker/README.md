@@ -174,7 +174,8 @@ with a message naming a missing or malformed variable.
   scripts, `--non-interactive` asks nothing and reads the asked values from the environment
   (`docker compose run --rm -e BBB_DOMAIN=bbb.example.org -e ACME_EMAIL=admin@example.org -e
   BBB_PUBLIC_IPV4=203.0.113.10 setup --non-interactive`); a missing required value is an error
-  that names it. An optional value that is set but empty (`BBB_FEATURES=`) counts as set. The
+  that names it. Before `.env` exists, Docker Compose warns that the stack's variables are not
+  set; setup does not need them. An optional value that is set but empty (`BBB_FEATURES=`) counts as set. The
   service has no network (`network_mode: none`) and contacts nothing, so it cannot see the
   server's address: type it. With the host's network it proposes the address of the default
   route's interface when that address is public (behind NAT, a floating IP, type the public one):
