@@ -23,7 +23,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Build tools only; this stage is not part of the image.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && apt-get install -y --no-install-recommends ca-certificates curl gcc libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Same steps as build/packages-template/bbb-shared-notes-server/build.sh: compile, rename to
@@ -68,6 +68,10 @@ RUN if [ "$TARGETARCH" != "amd64" ]; then \
     && grep ' yq_linux_amd64$' bbb-yq-go.sha256sum | sha256sum -c - \
     && install -m 0755 yq_linux_amd64 /usr/local/bin/yq
 
+# The PDF converter's network sandbox (docker/run-in-systemd.sh), statically linked.
+COPY docker/no-network.c /build/no-network/
+RUN gcc -O2 -Wall -Wextra -Werror -static -o /usr/local/bin/no-network /build/no-network/no-network.c
+
 
 # node:24.22.0-slim
 FROM docker.io/library/node@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5
@@ -80,6 +84,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /usr/local/bin/yq /usr/local/bin/yq
+COPY --from=build /usr/local/bin/no-network /usr/local/bin/no-network
 COPY --from=build /build/bbb-shared-notes-server /usr/share/bbb-shared-notes-server
 # The packaged default.yml is the entrypoint's input; it writes the configured copy to
 # config/default.yml, the path the server reads (src/config/index.ts).

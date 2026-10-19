@@ -13,10 +13,10 @@
 #   RuntimeMaxSec=<timeout>     timeout(1); SIGKILL if the command ignores SIGTERM
 #   WorkingDirectory=           the command runs in BBB_BLOCKNOTE_DIR (same default)
 #   UMask=0022                  umask 0022
-#   PrivateNetwork=true,        an unreachable HTTP(S) proxy (wkhtmltopdf uses the *_proxy
-#   IPAddressDeny=any           variables), so the HTML cannot make it fetch from other hosts.
-#                               Qt does not proxy loopback addresses: unlike on bare metal, the
-#                               command can still reach the server itself on 127.0.0.1:8787.
+#   PrivateNetwork=true,        no-network(1) of this image (docker/no-network.c): the command
+#   IPAddressDeny=any           and everything it starts cannot create sockets, so it reaches no
+#                               address, loopback included. It needs no privileges; if it cannot
+#                               set up the restriction, the command does not run.
 #
 # MemoryHigh/MemoryMax need cgroups; the memory limit of the service applies instead (an
 # address-space limit, ulimit -v, makes wkhtmltopdf's WebKit crash at start). ProtectSystem,
@@ -38,9 +38,4 @@ timeout_secs="$1"; shift
 cd "$BBB_BLOCKNOTE_DIR"
 umask 0022
 
-# Port 9 (discard) on loopback: nothing listens there, every proxied request fails at once.
-export http_proxy=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 \
-  HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9
-unset no_proxy NO_PROXY
-
-exec timeout --kill-after=10s "${timeout_secs}" "$@"
+exec no-network timeout --kill-after=10s "${timeout_secs}" "$@"

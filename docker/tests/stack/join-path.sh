@@ -23,12 +23,12 @@
 # JOIN_PATH_DEBUG=1 prints the GraphQL WebSocket messages the client receives (stderr).
 #
 # Steps: stack-healthy, then the client steps of join-path-client.mjs (api-index, create, join,
-# html5client, meetingStaticData, html5client-assets, graphql-ws, user-join, learning-dashboard,
-# default-presentation, upload-presentation, livekit); then restart (`docker compose restart`),
-# stack-healthy-after-restart and the client steps again; then restart-redis (the redis
-# container recreated alone, with a new address unless its address is fixed),
-# stack-healthy-after-redis and the client steps again; then restart-redis-late (every other
-# service restarted while redis is stopped, redis started 20 s later),
+# html5client, meetingStaticData, html5client-assets, graphql-ws, user-join, notes-export-pdf,
+# learning-dashboard, default-presentation, upload-presentation, livekit); then restart
+# (`docker compose restart`), stack-healthy-after-restart and the client steps again; then
+# restart-redis (the redis container recreated alone, with a new address unless its address is
+# fixed), stack-healthy-after-redis and the client steps again; then restart-redis-late (every
+# other service restarted while redis is stopped, redis started 20 s later),
 # stack-healthy-after-redis-late and the client steps again; then restart-graphql-middleware
 # (recreated alone while its old address is kept taken, so it gets a new one),
 # stack-healthy-after-graphql-middleware and the client steps again. nginx is never restarted:

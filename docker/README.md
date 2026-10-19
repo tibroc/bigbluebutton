@@ -273,9 +273,11 @@ the CA of its certificate. Its ports are published inside the Engine container o
 redirect to the client with the session token, `/api/rest/meetingStaticData` (Hasura,
 authenticated through akka-apps), the client's `index.html` and bundle (precompressed, with the
 build identifier of the settings as cache buster), the GraphQL WebSocket through
-graphql-middleware, the join mutation, the learning dashboard (the app, the meeting's data file
-from `bbb-data`, and 404 for other paths below it), the default presentation converted (bbb-web
-loads it from `https://bbb.example.com/default.pdf` through haproxy), a two-page PDF uploaded as the
+graphql-middleware, the join mutation, the shared notes exported as PDF as the notes menu does
+(`/hocuspocus/api/documents/<padId>/export/pdf`, authorized through bbb-web), the learning
+dashboard (the app, the meeting's data file from `bbb-data`, and 404 for other paths below it),
+the default presentation converted (bbb-web loads it from
+`https://bbb.example.com/default.pdf` through haproxy), a two-page PDF uploaded as the
 presentation uploader does and converted, and the LiveKit signaling URL. Then it runs `docker
 compose restart`, as a second cycle recreates the redis container alone (with a fixed address,
 `BBB_REDIS_IP`, it keeps its address; see below), and as a third cycle restarts every service while
@@ -285,6 +287,14 @@ services are healthy and repeats the join path, without restarting nginx (see ab
 `STEP <name>: OK|FAIL` and exits non-zero on failure. On a Docker host, run it directly in the directory of `docker-compose.yml`:
 `BBB_SHARED_SECRET=... docker/tests/stack/join-path.sh --domain <domain> --connect-ip ''`
 (add `--insecure` for a self-signed certificate; `--help` lists the options).
+
+`docker/tests/stack/notes-pdf-check.sh` checks the PDF converter of the shared-notes image on
+its own: like the bare-metal unit (`PrivateNetwork=true`, `IPAddressDeny=any`), wkhtmltopdf runs
+without network access (`no-network`, a seccomp filter that needs no privileges), no address is
+reachable from the page it converts, the server's own port included, and an export still
+produces a PDF:
+`docker/tests/stack/notes-pdf-check.sh --docker "podman exec -i bbb-dind docker" localhost/bbb-shared-notes:4.0.1`
+(or `--docker podman`).
 
 ## Running under an arbitrary UID/GID
 

@@ -1,7 +1,8 @@
 // Client part of join-path.sh: does what the html5 client does when a user joins, up to the
-// GraphQL subscription, then joins the meeting, waits for the default presentation and uploads a
-// PDF; prints `STEP <name>: OK|FAIL ...` per step. Runs with Node 24 (global fetch, FormData and
-// WebSocket), started by join-path.sh in a container on the host network.
+// GraphQL subscription, then joins the meeting, exports the shared notes as PDF, waits for the
+// default presentation and uploads a PDF; prints `STEP <name>: OK|FAIL ...` per step. Runs with
+// Node 24 (global fetch, FormData and WebSocket), started by join-path.sh in a container on the
+// host network.
 //
 // Arguments: BASE_URL (https://<domain>) TIMEOUT_SECONDS. The shared secret is the first line
 // of stdin; it is used only to compute checksums and is never printed.
@@ -176,6 +177,42 @@ async function run() {
       { authToken, clientType: 'HTML5', clientIsMobile: false });
     user = (await ws.next(userSub, (d) => d?.user_current?.[0]?.joined && d.user_current[0].presenter)).user_current[0];
     ok(step, `joined=${user.joined} presenter=${user.presenter}`);
+
+    // The shared notes' PDF export as the notes menu starts it (bigbluebutton-html5/imports/ui/
+    // components/notes/notes-dropdown/component.tsx:111-124): the pad id from the getPadId query
+    // (notes/component.tsx:196-201, notes/queries.ts) with public.notes.id, then
+    // GET /hocuspocus/api/documents/<padId>/export/pdf?sessionToken=..., which nginx authorizes
+    // through bbb-web (bbb-shared-notes-server.nginx) and shared-notes renders with wkhtmltopdf
+    // through its runner script (exportDocumentToPdf.ts).
+    step = 'notes-export-pdf';
+    const padSub = ws.subscribe('getPadId',
+      'query getPadId($externalId: String!) { sharedNotes(where: { sharedNotesExtId: { _eq: $externalId } }) { padId sharedNotesExtId } }',
+      { externalId: settings?.public?.notes?.id ?? 'notes' }, { repeatMs: 1000 });
+    const { padId } = (await ws.next(padSub, (d) => d?.sharedNotes?.[0]?.padId)).sharedNotes[0];
+    ws.stop(padSub);
+    const notesHost = settings?.public?.sharedNotes?.serverHostname || base.hostname;
+    const notesUrl = new URL(`https://${notesHost}${base.port ? `:${base.port}` : ''}/hocuspocus/api/documents/${encodeURIComponent(padId)}/export/pdf?sessionToken=${encodeURIComponent(sessionToken)}`);
+    // shared-notes answers 403 until bbb-web reports the user as online (User-Currently-Online,
+    // ConnectionController.groovy checkGraphqlAuthorization); bbb-web learns of the join from
+    // akka-apps through redis, which can take a moment after a restart. A user opens the menu
+    // later than this script, so a 403 is repeated for a few seconds.
+    let notesPdf;
+    let notesAttempts = 0;
+    const notesUntil = Date.now() + 10_000;
+    for (;;) {
+      notesAttempts += 1;
+      res = await get(notesUrl);
+      notesPdf = Buffer.from(await res.arrayBuffer());
+      if (res.status !== 403 || Date.now() > notesUntil) break;
+      await new Promise((r) => { setTimeout(r, 500); });
+    }
+    const notesType = res.headers.get('content-type');
+    if (res.status !== 200) fail(`GET export/pdf HTTP ${res.status} after ${notesAttempts} attempt(s) ${redact(notesPdf.toString('utf8', 0, 200))}`);
+    if (!notesType?.startsWith('application/pdf')) fail(`GET export/pdf: Content-Type ${notesType}`);
+    if (notesPdf.subarray(0, 5).toString('latin1') !== '%PDF-' || !notesPdf.subarray(-32).toString('latin1').includes('%%EOF')) {
+      fail(`GET export/pdf: ${notesPdf.length} bytes, not a PDF`);
+    }
+    ok(step, `padId=${padId} HTTP 200 (attempt ${notesAttempts}) ${notesType} ${notesPdf.length} bytes %PDF-…%%EOF`);
 
     // The learning dashboard as a moderator opens it (bigbluebutton-html5/imports/ui/components/
     // learning-dashboard/service.js): the app from the learning-dashboard image, and the meeting's
