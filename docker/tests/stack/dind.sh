@@ -16,6 +16,8 @@
 #                      webhooks=0)
 #   test [ARG...]      docker/tests/stack/join-path.sh against the stack (ARGs passed on)
 #   webhooks ARG...    docker/tests/stack/webhooks-check.sh against the stack (ARGs passed on)
+#   conversion [ARG...] docker/tests/stack/conversion-check.sh against the stack's conversion
+#                      service, with bbb-web as the client (ARGs passed on)
 #   compose ARG...     docker compose ARG... for the stack
 #   docker ARG...      docker ARG... in the Engine
 #   stop               remove the Engine container and its volume (the stack with it)
@@ -186,6 +188,12 @@ case "$cmd" in
         BBB_SHARED_SECRET="$(sed -n 's/^BBB_SHARED_SECRET=//p' "$HERE/fixture.env")" \
             "$HERE/webhooks-check.sh" "$@" --docker "podman exec -i $NAME docker" \
             --image "localhost/bbb-webhooks:$TAG"
+        ;;
+    conversion)
+        require_running
+        "$HERE/conversion-check.sh" --docker "podman exec -i $NAME docker" \
+            --listener-image "localhost/bbb-graphql-actions:$TAG" --client-image "localhost/bbb-web:$TAG" \
+            --stack "podman exec -i -e BBB_IMAGE_TAG=$TAG $NAME docker compose $COMPOSE_ARGS" "$@"
         ;;
     compose) require_running; compose "$@" ;;
     docker) require_running; in_engine docker "$@" ;;

@@ -1,8 +1,8 @@
 // Client part of join-path.sh: does what the html5 client does when a user joins, up to the
 // GraphQL subscription, then joins the meeting, exports the shared notes as PDF, waits for the
-// default presentation and uploads a PDF; prints `STEP <name>: OK|FAIL ...` per step. Runs with
-// Node 24 (global fetch, FormData and WebSocket), started by join-path.sh in a container on the
-// host network.
+// default presentation and uploads a PDF and a .docx; prints `STEP <name>: OK|FAIL ...` per
+// step. Runs with Node 24 (global fetch, FormData and WebSocket), started by join-path.sh in a
+// container on the host network.
 //
 // Arguments: BASE_URL (https://<domain>) TIMEOUT_SECONDS. The shared secret is the first line
 // of stdin; it is used only to compute checksums and is never printed.
@@ -10,6 +10,7 @@
 // Exit status: 0 every step OK, 1 a step failed.
 
 import { createHash, randomUUID } from 'node:crypto';
+import { crc32 } from 'node:zlib';
 
 // node -e: argv[1] is the first argument.
 const [baseUrl, timeoutArg] = process.argv.slice(1);
@@ -282,40 +283,48 @@ async function run() {
     // actions-bar/media-area/media-sharing/presentation/service.js:44-120, mutation.ts, queries.ts):
     // request an upload token, read it from pres_presentation_uploadToken, POST the file to
     // <uploadEndpoint with the token> (settings.yml public.presentation.uploadEndpoint).
+    const upload = async (filename, file, pages) => {
+      const uploadTemporaryId = `join-path-${randomUUID()}`;
+      ws.request('RequestPresentationUploadToken',
+        'mutation RequestPresentationUploadToken($podId: String!, $filename: String!, $uploadTemporaryId: String!) { presentationRequestUploadToken(podId: $podId, filename: $filename, uploadTemporaryId: $uploadTemporaryId) }',
+        { podId: 'DEFAULT_PRESENTATION_POD', filename, uploadTemporaryId });
+      const tokenSub = ws.subscribe('getPresentationUploadToken',
+        'query getPresentationUploadToken($uploadTemporaryId: String!) { pres_presentation_uploadToken(where: {uploadTemporaryId: {_eq: $uploadTemporaryId}}) { presentationId uploadTemporaryId uploadToken } }',
+        { uploadTemporaryId }, { repeatMs: 1000 });
+      const { uploadToken } = (await ws.next(tokenSub, (d) => d?.pres_presentation_uploadToken?.[0]?.uploadToken))
+        .pres_presentation_uploadToken[0];
+      ws.stop(tokenSub);
+      const uploadEndpoint = settings?.public?.presentation?.uploadEndpoint ?? '/bigbluebutton/presentation/upload';
+      const form = new FormData();
+      form.append('fileUpload', file, filename);
+      form.append('conference', meeting.meetingId);
+      form.append('room', meeting.meetingId);
+      form.append('temporaryPresentationId', uploadTemporaryId);
+      form.append('pod_id', 'DEFAULT_PRESENTATION_POD');
+      form.append('is_downloadable', 'false');
+      form.append('current', 'true');
+      res = await fetch(new URL(uploadEndpoint.replace('upload', `${uploadToken}/upload`), base), {
+        method: 'POST',
+        body: form,
+        headers: cookies.size ? { cookie: cookieHeader() } : {},
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      const uploadBody = (await res.text()).trim();
+      if (res.status !== 200) fail(`POST upload HTTP ${res.status} ${redact(uploadBody.slice(0, 200))}`);
+      pres = await ws.next(presSub, (d) => d?.pres_presentation?.find((p) => p.name === filename && (converted(p) || failed(p))),
+        conversionTimeoutMs);
+      if (failed(pres)) fail(`conversion failed: ${pres.uploadErrorMsgKey} ${JSON.stringify(pres.uploadErrorDetailsJson ?? '')}`);
+      if (pres.totalPages !== pages) fail(`${filename}: ${pres.totalPages} pages, expected ${pages}`);
+      ok(step, `${JSON.stringify(pres.name)} ${pres.totalPagesUploaded}/${pres.totalPages} pages converted`);
+    };
     step = 'upload-presentation';
-    const uploadTemporaryId = `join-path-${randomUUID()}`;
-    const filename = 'join-path.pdf';
-    ws.request('RequestPresentationUploadToken',
-      'mutation RequestPresentationUploadToken($podId: String!, $filename: String!, $uploadTemporaryId: String!) { presentationRequestUploadToken(podId: $podId, filename: $filename, uploadTemporaryId: $uploadTemporaryId) }',
-      { podId: 'DEFAULT_PRESENTATION_POD', filename, uploadTemporaryId });
-    const tokenSub = ws.subscribe('getPresentationUploadToken',
-      'query getPresentationUploadToken($uploadTemporaryId: String!) { pres_presentation_uploadToken(where: {uploadTemporaryId: {_eq: $uploadTemporaryId}}) { presentationId uploadTemporaryId uploadToken } }',
-      { uploadTemporaryId }, { repeatMs: 1000 });
-    const { uploadToken } = (await ws.next(tokenSub, (d) => d?.pres_presentation_uploadToken?.[0]?.uploadToken))
-      .pres_presentation_uploadToken[0];
-    ws.stop(tokenSub);
-    const uploadEndpoint = settings?.public?.presentation?.uploadEndpoint ?? '/bigbluebutton/presentation/upload';
-    const form = new FormData();
-    form.append('fileUpload', new Blob([pdf(UPLOAD_PAGES)], { type: 'application/pdf' }), filename);
-    form.append('conference', meeting.meetingId);
-    form.append('room', meeting.meetingId);
-    form.append('temporaryPresentationId', uploadTemporaryId);
-    form.append('pod_id', 'DEFAULT_PRESENTATION_POD');
-    form.append('is_downloadable', 'false');
-    form.append('current', 'true');
-    res = await fetch(new URL(uploadEndpoint.replace('upload', `${uploadToken}/upload`), base), {
-      method: 'POST',
-      body: form,
-      headers: cookies.size ? { cookie: cookieHeader() } : {},
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    const uploadBody = (await res.text()).trim();
-    if (res.status !== 200) fail(`POST upload HTTP ${res.status} ${redact(uploadBody.slice(0, 200))}`);
-    pres = await ws.next(presSub, (d) => d?.pres_presentation?.find((p) => p.name === filename && (converted(p) || failed(p))),
-      conversionTimeoutMs);
-    if (failed(pres)) fail(`conversion failed: ${pres.uploadErrorMsgKey} ${JSON.stringify(pres.uploadErrorDetailsJson ?? '')}`);
-    if (pres.totalPages !== UPLOAD_PAGES) fail(`${filename}: ${pres.totalPages} pages, expected ${UPLOAD_PAGES}`);
-    ok(step, `${JSON.stringify(pres.name)} ${pres.totalPagesUploaded}/${pres.totalPages} pages converted`);
+    await upload('join-path.pdf', new Blob([pdf(UPLOAD_PAGES)], { type: 'application/pdf' }), UPLOAD_PAGES);
+
+    // 9. An office document, uploaded the same way: bbb-web converts it to PDF through the
+    // conversion service (BBB_WEB_CONVERSION_URL, convert-remote.sh), then page by page.
+    step = 'upload-office-document';
+    await upload('join-path.docx', new Blob([docx(UPLOAD_PAGES)],
+      { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), UPLOAD_PAGES);
 
     // 5. LiveKit signaling URL handed to the client
     // (bigbluebutton-html5/imports/ui/components/livekit/primary-room/component.tsx:197).
@@ -489,6 +498,55 @@ function pdf(pages) {
   out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`;
   out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return Buffer.from(out, 'latin1');
+}
+
+// A Word document (.docx) with N pages of text, built by hand: the three parts a WordprocessingML
+// package needs (ECMA-376 Part 2 package, Part 1 document), each page after the first starting
+// with a page break, in a ZIP archive without compression.
+function docx(pages) {
+  const ns = 'http://schemas.openxmlformats.org';
+  const paras = [];
+  for (let i = 1; i <= pages; i += 1) {
+    paras.push(`<w:p><w:r>${i > 1 ? '<w:br w:type="page"/>' : ''}<w:t>join-path page ${i}</w:t></w:r></w:p>`);
+  }
+  return zip([
+    ['[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="${ns}/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`],
+    ['_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="${ns}/package/2006/relationships"><Relationship Id="rId1" Type="${ns}/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`],
+    ['word/document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="${ns}/wordprocessingml/2006/main"><w:body>${paras.join('')}</w:body></w:document>`],
+  ]);
+}
+
+// A ZIP archive of [name, text] entries, stored (method 0), as APPNOTE.TXT 4.3 lays it out.
+function zip(entries) {
+  const parts = [];
+  const central = [];
+  let offset = 0;
+  for (const [name, text] of entries) {
+    const nameBuf = Buffer.from(name, 'utf8');
+    const data = Buffer.from(text, 'utf8');
+    const crc = crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0, 6);
+    local.writeUInt16LE(0, 8); local.writeUInt32LE(0, 10); local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBuf.length, 26); local.writeUInt16LE(0, 28);
+    const cd = Buffer.alloc(46);
+    cd.writeUInt32LE(0x02014b50, 0); cd.writeUInt16LE(20, 4); cd.writeUInt16LE(20, 6);
+    cd.writeUInt16LE(0, 8); cd.writeUInt16LE(0, 10); cd.writeUInt32LE(0, 12); cd.writeUInt32LE(crc, 16);
+    cd.writeUInt32LE(data.length, 20); cd.writeUInt32LE(data.length, 24); cd.writeUInt16LE(nameBuf.length, 28);
+    cd.writeUInt32LE(offset, 42);
+    parts.push(local, nameBuf, data);
+    central.push(cd, nameBuf);
+    offset += local.length + nameBuf.length + data.length;
+  }
+  const cdBuf = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(cdBuf.length, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...parts, cdBuf, end]);
 }
 
 process.exit(await run());

@@ -158,9 +158,9 @@ with a message naming a missing or malformed variable.
 - **Walking skeleton.** The file has the services of the skeleton: haproxy, certbot, nginx,
   html5 (the html5 client), learning-dashboard, bbb-web, akka-apps, graphql-server,
   graphql-middleware, graphql-actions, shared-notes, export-annotations, redis, postgres, db-init (a job that exits after setting up the
-  databases), livekit, bbb-webrtc-sfu and coturn, and the optional webhooks (profile
-  `webhooks`, below), and the run-only `setup` that writes `.env` (below). Recording, office
-  conversion, greenlight, monitoring and preflight follow; until then use
+  databases), livekit, bbb-webrtc-sfu, coturn and the office document conversion
+  (`conversion`, below), and the optional webhooks (profile `webhooks`, below), and the run-only
+  `setup` that writes `.env` (below). Recording, greenlight, monitoring and preflight follow; until then use
   `BBB_FEATURES=recording`, `BBB_FEATURES=webhooks`, both, or an empty `BBB_FEATURES`.
 - **Writing `.env`: `docker compose run --rm setup`.** The setup image writes `.env` next to
   `docker-compose.yml` from the configuration contract: it starts from the existing `.env`, else
@@ -191,6 +191,47 @@ with a message naming a missing or malformed variable.
   the image's configuration; the shared secret, the domain, redis and the listen address come
   from the environment and cannot be changed there, nor can Bearer auth be turned off there
   while `WEBHOOKS_BEARER_AUTH=true`.
+- **Office documents** (Word, PowerPoint, Excel, OpenDocument and the other formats LibreOffice
+  reads) are converted to PDF by the `conversion` service, for bbb-web's presentation upload.
+  On bare metal, bbb-web runs LibreOffice in a new `docker run --network none bbb-soffice`
+  container per document (`bbb-libreoffice/assets/convert-local.sh`), which needs the Docker
+  socket; upstream's alternative is a Collabora Online server, which
+  `bbb-libreoffice/assets/convert-cool.sh` calls (`POST /cool/convert-to/<format>` with the
+  document in the form field `data`). The `conversion` service is that server: Collabora's
+  `collabora/code` image (CODE, the Collabora Online Development Edition), pinned by digest and
+  unchanged, with TLS off on its internal network and the update check off (`extra_params`).
+  bbb-web calls it with its `convert-remote.sh` at `BBB_WEB_CONVERSION_URL` (default
+  `http://conversion:9980/cool/convert-to`); point that variable at another Collabora Online
+  server (`https://<host>:9980/cool/convert-to`), or set it empty to turn office conversion off
+  (PDF and image uploads still work). The service is attached only to the internal `conversion`
+  network, which it shares with bbb-web alone and which has no route out; bbb-web's port 8090 is
+  the only one it can reach. Collabora loads data that a document links to (an HTML stylesheet,
+  for example) from the hosts its `coolwsd.xml` allows as data sources: `net.lok_allow` and,
+  while the `allow` attribute of `net.post_allow` is true, `net.post_allow`. Both list the
+  private address ranges by default, which include bbb-web's address. `extra_params` therefore
+  sets `--o:net.post_allow[@allow]=false` (the post_allow hosts are no data sources any more)
+  and replaces the private ranges in `net.lok_allow` (entries 0, 3 and 4) by `127.0.0.1/32`, so
+  only loopback remains. `docker/tests/stack/conversion-check.sh` checks with a listener on that
+  network that no linked resource is fetched, and that an instance with Collabora's defaults
+  does fetch one. On Kubernetes, add a NetworkPolicy with ingress from bbb-web only and no
+  egress as a second layer.
+  `net.post_allow` still filters the clients of convert-to: Collabora accepts the request only
+  from 192.168.0.0/16, 172.16.0.0/12, 10.0.0.0/8 and loopback (`coolwsd.xml`). Docker's default
+  address pools and podman's lie inside these ranges. Where the `conversion` network or the pod
+  network does not (a Docker `default-address-pools` or a Kubernetes pod CIDR such as
+  100.64.0.0/10), conversions fail with HTTP 403; add the range to `extra_params`, for example
+  `--o:net.post_allow.host[5]=100.64.0.0/10`.
+  Collabora runs as its image's user (`cool`, UID 1001; it refuses to start its document
+  processes under another user, so `BBB_UID` does not apply) and isolates each document in a
+  jail: with the capabilities `CHOWN`, `FOWNER` and `SYS_CHROOT` (the only ones the service
+  keeps) its `coolforkit-caps` helper builds chroot jails through file capabilities, so the
+  container must not run with `no-new-privileges`; its jail directories (`/opt/cool/child-roots`,
+  `/opt/cool/cache`) are tmpfs mounts that allow `exec`. Collabora's own limits apply
+  (`coolwsd.xml`, for example `per_document.limit_convert_secs`, 100 s); bbb-web gives up after
+  `officeToPdfConversionTimeout` (60 s) and accepts no upload above `maxFileSizeUpload`
+  (30000000 bytes). Collabora's settings can be changed through `extra_params`
+  (`--o:<key>=<value>`) in a compose override. It needs about 0.5 to 0.9 GB of memory when idle
+  (it keeps document processes ready), and its image is about 1.3 GB.
 - **nginx follows restarted services.** The services nginx proxies to (bbb-web, shared-notes,
   graphql-server, graphql-middleware, livekit, bbb-webrtc-sfu, html5, learning-dashboard) are
   upstream groups with `server <service>:<port> resolve` in `/etc/nginx/conf.d/bbb-upstreams.conf`,
@@ -285,6 +326,7 @@ docker/tests/stack/dind.sh start     # Docker Engine in a privileged podman cont
 docker/tests/stack/dind.sh load      # copies the images of docker-compose.yml from podman
 docker/tests/stack/dind.sh up        # test certificate, docker compose up -d --wait, no certbot
 docker/tests/stack/dind.sh test      # join-path.sh, including three restart cycles
+docker/tests/stack/dind.sh conversion   # conversion-check.sh against the stack's conversion service
 docker/tests/stack/dind.sh compose logs akka-apps   # any docker compose command
 docker/tests/stack/dind.sh stop      # removes the Engine container and all its data
 ```
@@ -302,7 +344,8 @@ graphql-middleware, the join mutation, the shared notes exported as PDF as the n
 (`/hocuspocus/api/documents/<padId>/export/pdf`, authorized through bbb-web), the learning
 dashboard (the app, the meeting's data file from `bbb-data`, and 404 for other paths below it),
 the default presentation converted (bbb-web loads it from
-`https://bbb.example.com/default.pdf` through haproxy), a two-page PDF uploaded as the
+`https://bbb.example.com/default.pdf` through haproxy), a two-page PDF and a two-page Word
+document (`.docx`, converted by the `conversion` service) uploaded as the
 presentation uploader does and converted, and the LiveKit signaling URL. Then it runs `docker
 compose restart`, as a second cycle recreates the redis container alone (with a fixed address,
 `BBB_REDIS_IP`, it keeps its address; see below), and as a third cycle restarts every service while
@@ -321,6 +364,16 @@ Landlock, it writes only to its work directory and cannot open the memory of oth
 and an export still produces a PDF:
 `docker/tests/stack/notes-pdf-check.sh --docker "podman exec -i bbb-dind docker" localhost/bbb-shared-notes:4.0.1`
 (or `--docker podman`).
+
+`docker/tests/stack/conversion-check.sh` tests the `conversion` service as
+`docker-compose.yml` defines it, on an internal network of its own (needs Docker Compose:
+`conversion-check.sh --docker "podman exec -i bbb-dind docker" --client-image
+localhost/bbb-web:4.0.1 --listener-image localhost/bbb-graphql-actions:4.0.1`), or, with
+`dind.sh conversion`, the stack's service with bbb-web as the client: Word, OpenDocument,
+PowerPoint and Excel documents (made by the service from the flat ODF files in
+`docker/tests/stack/conversion-samples/`) converted through bbb-web's `convert-remote.sh` with
+the expected page counts, documents with linked images converted without any request reaching
+a listener on the service's network, and the service attached to its internal network only.
 
 ## Running under an arbitrary UID/GID
 
