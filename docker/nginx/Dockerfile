@@ -1,16 +1,14 @@
-# nginx: BigBlueButton's web server. Serves the landing page, the ACME webroot and the learning
-# dashboard app, and carries the location fragments of the packages
-# (/usr/share/bigbluebutton/nginx/), which proxy to the services, among them the html5 client (its
-# own image, compose service `html5`).
-# haproxy terminates TLS and sends HTTP to port 81 with the PROXY protocol (ADR-07); port 80 is
-# published for ACME and the redirect to HTTPS.
+# nginx: BigBlueButton's web server. Serves the landing page and the ACME webroot, and carries
+# the location fragments of the packages (/usr/share/bigbluebutton/nginx/), which proxy to the
+# services, among them the html5 client and the learning dashboard (their own images, compose
+# services `html5` and `learning-dashboard`). haproxy terminates TLS and sends HTTP to port 81
+# with the PROXY protocol (ADR-07); port 80 is published for ACME and the redirect to HTTPS.
 #
-# Build with bake (docker/bake/nginx.hcl) or with podman, after building the learning dashboard
-# (docker/bake/learning-dashboard.hcl, bbb-learning-dashboard/Dockerfile):
+# Build with bake (docker/bake/nginx.hcl) or with podman:
 #   podman build --build-context entrypoint-lib=docker/lib \
 #     --build-context packages=build/packages-template \
 #     --build-context bigbluebutton-web=bigbluebutton-web \
-#     --build-context learning-dashboard=container-image://localhost/bbb-learning-dashboard:golden \
+#     --build-context learning-dashboard=bbb-learning-dashboard \
 #     --build-context rap-presentation=record-and-playback/presentation/scripts \
 #     --build-context bigbluebutton-config=bigbluebutton-config docker/nginx
 #
@@ -53,8 +51,7 @@ COPY --from=bigbluebutton-web --chmod=0644 bbb-web.nginx /usr/local/share/bbb/ng
 COPY --from=bigbluebutton-web --chmod=0644 loadbalancer.nginx nginx-confs/presentation-slides.nginx \
      /usr/local/share/bbb/nginx/fragments/
 # hadolint ignore=DL3022
-COPY --from=learning-dashboard --chmod=0644 /usr/share/bigbluebutton/nginx/learning-dashboard.nginx \
-     /usr/local/share/bbb/nginx/fragments/
+COPY --from=learning-dashboard --chmod=0644 learning-dashboard.nginx /usr/local/share/bbb/nginx/fragments/
 # hadolint ignore=DL3022
 COPY --from=rap-presentation --chmod=0644 presentation.nginx /usr/local/share/bbb/nginx/fragments/
 COPY --chmod=0644 default-fe.nginx bbb-html5.nginx.static /usr/local/share/bbb/nginx/fragments/
@@ -63,10 +60,11 @@ COPY --chmod=0644 default-fe.nginx bbb-html5.nginx.static /usr/local/share/bbb/n
 # (docs: compose.md "Service names"). Hasura's REST endpoints go to graphql-server directly,
 # without the local load balancer on 127.0.0.1:8185 (hasura-loadbalancer.conf is not shipped:
 # replicas sit behind one service name). The build fails if a local upstream is left.
-# The learning dashboard app comes from this image, not from the bbb-data volume (ADR-09): the
-# prefix location serves the image's copy, and a nested regex location serves only the JSON file
-# bbb-web writes per meeting (<meetingId>/<token>/learning_dashboard_data.json) from the volume.
-# The upstream file has CRLF line endings; the added lines keep them.
+# The learning dashboard app comes from its own image (service learning-dashboard, port 8080),
+# not from the bbb-data volume (ADR-09): the prefix location proxies to it, and a nested regex
+# location serves only the JSON file bbb-web writes per meeting
+# (<meetingId>/<token>/learning_dashboard_data.json) from the volume. The upstream file has CRLF
+# line endings; the added lines keep them.
 WORKDIR /usr/local/share/bbb/nginx/fragments
 # SC2016: `$1` is nginx's regex capture, written literally.
 # hadolint ignore=SC2016
@@ -81,10 +79,10 @@ RUN sed -i 's|http://127\.0\.0\.1:8090|http://bbb-web:8090|g' web bbb-shared-not
          '    location ~ "^/learning-analytics-dashboard/([^/]+/[^/]+/learning_dashboard_data\.json)$" {' \
          '        alias /var/bigbluebutton/learning-dashboard/$1;' \
          '    }' >/tmp/learning-dashboard-data.nginx \
-    && sed -i -e 's|^\(    alias \)/var/bigbluebutton/learning-dashboard/;|\1/usr/share/bigbluebutton/learning-dashboard/;|' \
+    && sed -i -e 's|^    alias /var/bigbluebutton/learning-dashboard/;|    proxy_pass http://learning-dashboard:8080;|' \
               -e '/^    autoindex off;/r /tmp/learning-dashboard-data.nginx' learning-dashboard.nginx \
     && rm /tmp/learning-dashboard-data.nginx \
-    && if ! grep -q '^    alias /usr/share/bigbluebutton/learning-dashboard/;' learning-dashboard.nginx \
+    && if ! grep -q '^    proxy_pass http://learning-dashboard:8080;' learning-dashboard.nginx \
          || ! grep -q 'learning_dashboard_data' learning-dashboard.nginx; then \
          echo "learning-dashboard.nginx: upstream fragment changed, edit not applied" >&2; exit 1; \
        fi \
@@ -94,17 +92,13 @@ RUN sed -i 's|http://127\.0\.0\.1:8090|http://bbb-web:8090|g' web bbb-shared-not
 WORKDIR /
 
 # Shipped unchanged at the bare-metal paths: include_default.nginx (bbb-config), the Hasura
-# settings cache zone (bbb-graphql-middleware) and the landing page assets (bbb-config). The
-# learning dashboard app (bbb-learning-dashboard) goes to /usr/share/bigbluebutton: its bare-metal
-# path /var/bigbluebutton/learning-dashboard is on the bbb-data volume here.
+# settings cache zone (bbb-graphql-middleware) and the landing page assets (bbb-config).
 # hadolint ignore=DL3022
 COPY --from=packages --chmod=0644 bbb-config/include_default.nginx /usr/share/bigbluebutton/include_default.nginx
 # hadolint ignore=DL3022
 COPY --from=packages --chmod=0644 bbb-graphql-middleware/bbb-graphql-client-settings-cache.conf /etc/nginx/conf.d/
 # hadolint ignore=DL3022
 COPY --from=bigbluebutton-config assets /var/www/bigbluebutton-default/assets
-# hadolint ignore=DL3022
-COPY --from=learning-dashboard /usr/share/bigbluebutton/learning-dashboard /usr/share/bigbluebutton/learning-dashboard
 COPY --chmod=0644 nginx.conf /etc/nginx/nginx.conf
 COPY --chmod=0644 bigbluebutton /usr/local/share/bbb/nginx/bigbluebutton
 

@@ -9,7 +9,7 @@ target "nginx" {
     contexts = {
         packages = "./build/packages-template"
         bigbluebutton-web = "./bigbluebutton-web"
-        learning-dashboard = "target:learning-dashboard"
+        learning-dashboard = "./bbb-learning-dashboard"
         rap-presentation = "./record-and-playback/presentation/scripts"
         bigbluebutton-config = "./bigbluebutton-config"
     }
