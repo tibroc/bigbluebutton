@@ -6,8 +6,8 @@
 #   docker compose run --rm setup     # writes .env (secrets generated, domain etc. asked)
 #   docker compose up -d
 #
-# Optional (BBB_FEATURES/profiles): webhooks. Not in the stack yet: recording, office conversion,
-# greenlight, monitoring and preflight. See docker/README.md.
+# Optional (BBB_FEATURES/profiles): webhooks. Not in the stack yet: recording, greenlight,
+# monitoring and preflight. See docker/README.md.
 
 name: bigbluebutton
 
@@ -167,7 +167,8 @@ services:
       BBB_SHARED_SECRET: ${BBB_SHARED_SECRET}
       TURN_SECRET: ${TURN_SECRET}
       BBB_FEATURES: ${BBB_FEATURES-recording}
-      BBB_WEB_CONVERSION_URL: ${BBB_WEB_CONVERSION_URL:-}
+      # The conversion service below; empty: office documents are not converted.
+      BBB_WEB_CONVERSION_URL: ${BBB_WEB_CONVERSION_URL-http://conversion:9980/cool/convert-to}
       BBB_WEB_PAGE_TOKEN_SECRET: ${BBB_WEB_PAGE_TOKEN_SECRET:-}
       BBB_WEB_MAX_HEAP_SIZE: ${BBB_WEB_MAX_HEAP_SIZE:-384m}
     read_only: true
@@ -179,6 +180,7 @@ services:
     networks:
       - bbb
       - notes
+      - conversion
     depends_on:
       redis:
         condition: service_healthy
@@ -187,6 +189,46 @@ services:
       interval: 10s
       timeout: 5s
       start_period: 120s
+      retries: 3
+
+  # Office document conversion for bbb-web (ADR-13): Collabora Online (CODE), the convert-to
+  # server that bbb-libreoffice/assets/convert-cool.sh names, unchanged. bbb-web posts each
+  # document to http://conversion:9980/cool/convert-to/pdf (plain HTTP on this network: TLS off,
+  # coolwsd.xml ssl.enable/ssl.termination). Attached to the internal `conversion` network only,
+  # which it shares with bbb-web alone, with no route out (Kubernetes: a NetworkPolicy with
+  # ingress from bbb-web only and no egress). The update check is off: it could not connect.
+  # Links in documents: Collabora loads external data (an HTML stylesheet, for example) from
+  # the hosts of net.lok_allow and, while post_allow's `allow` attribute is true, of
+  # net.post_allow (coolwsd.xml). Their defaults hold the private ranges, so a document could
+  # make it fetch from bbb-web. extra_params turns post_allow's data-source role off (its filter
+  # of client addresses for convert-to stays: bbb-web's private address is accepted) and
+  # replaces the private ranges of lok_allow (entries 0, 3 and 4) by 127.0.0.1/32, which leaves
+  # only loopback.
+  # It runs as the image's user `cool` (coolforkit refuses any other user) with the
+  # capabilities its jails need (CHOWN, FOWNER and SYS_CHROOT for coolforkit-caps, which needs
+  # file capabilities, so no no-new-privileges); the jails live in tmpfs mounts that allow exec.
+  conversion:
+    image: docker.io/collabora/code:26.04.5.1.1@sha256:bb8f3c9c5c9016045f25fccb5f0649be94469ebc7c7cc379f3576e470cccf33d
+    restart: unless-stopped
+    environment:
+      extra_params: >-
+        --o:ssl.enable=false --o:ssl.termination=false --o:fetch_update_check=0
+        --o:net.post_allow[@allow]=false --o:net.lok_allow.host[0]=127.0.0.1/32
+        --o:net.lok_allow.host[3]=127.0.0.1/32 --o:net.lok_allow.host[4]=127.0.0.1/32
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /opt/cool/child-roots:exec,mode=1777
+      - /opt/cool/cache:exec,mode=1777
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER, SYS_CHROOT]
+    networks:
+      - conversion
+    healthcheck:
+      test: ["CMD", "/usr/bin/coolwsd", "--probe", "--use-env-vars"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
       retries: 3
 
   akka-apps:
@@ -538,6 +580,9 @@ networks:
           ip_range: ${BBB_NETWORK_IP_RANGE:-172.30.82.128/25}
   # shared-notes and the services it talks to (compose.md "Networks", OQ-21).
   notes:
+    internal: true
+  # bbb-web and the office conversion service only (compose.md "Networks", ADR-13).
+  conversion:
     internal: true
 
 volumes:

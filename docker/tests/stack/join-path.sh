@@ -24,7 +24,8 @@
 #
 # Steps: stack-healthy, then the client steps of join-path-client.mjs (api-index, create, join,
 # html5client, meetingStaticData, html5client-assets, graphql-ws, user-join, notes-export-pdf,
-# learning-dashboard, default-presentation, upload-presentation, livekit); then restart
+# learning-dashboard, default-presentation, upload-presentation, upload-office-document (a .docx,
+# converted by the conversion service), livekit); then restart
 # (`docker compose restart`), stack-healthy-after-restart and the client steps again; then
 # restart-redis (the redis container recreated alone, with a new address unless its address is
 # fixed), stack-healthy-after-redis and the client steps again; then restart-redis-late (every
