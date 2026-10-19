@@ -11,7 +11,8 @@
 #                      (docker-checks.yml, job "Stack"); the repository is used where it is.
 #                      `start` only checks the Engine, `load` is not available (load or pull
 #                      the images yourself), `stop` runs `docker compose down -v` and removes
-#                      the test certificate's volumes. podman is not needed.
+#                      the test certificate's volumes. podman is not needed. The stack's ports
+#                      (80/tcp, 443/tcp, 7882/udp, 3478/udp and tcp) are published on this host.
 #
 #   start              start the Docker Engine container (idempotent)
 #   load [IMAGE...]    copy images from podman into the Engine; default: every image of the
@@ -37,7 +38,8 @@
 #   DIND_NAME          name of the podman container (default bbb-dind); its image store and
 #                      volumes are in the podman volume DIND_NAME-data
 #   BBB_IMAGE_TAG      tag of the BBB images (default 4.0.1)
-#   DIND_SOCKET_DIR    `start` only: an existing directory of this host where the Engine also
+#   DIND_SOCKET_DIR    `start` only: an existing directory of this host (absolute path, no `:`;
+#                      applies when the Engine container is started) where the Engine also
 #                      serves its API (DIR/docker.sock), so that the `docker` CLI of this host
 #                      can use it (DOCKER_HOST=unix://DIR/docker.sock, with --host). Keep the
 #                      path short (a socket path has at most 107 bytes) and the directory
@@ -159,8 +161,13 @@ start() {
         docker version
         return
     fi
+    if [ -n "${DIND_SOCKET_DIR:-}" ]; then
+        [[ "$DIND_SOCKET_DIR" == /* && "$DIND_SOCKET_DIR" != *:* ]] \
+            || die "DIND_SOCKET_DIR must be an absolute path without ':': $DIND_SOCKET_DIR"
+    fi
     if running; then
         echo "Engine container $NAME is running"
+        [ -z "${DIND_SOCKET_DIR:-}" ] || echo "dind.sh: DIND_SOCKET_DIR ignored: $NAME is already running (stop it first to serve the socket)" >&2
     else
         podman rm -f "$NAME" >/dev/null 2>&1 || true
         local socket_args=() dockerd_args=()

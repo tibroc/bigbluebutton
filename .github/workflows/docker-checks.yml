@@ -30,6 +30,11 @@ concurrency:
 env:
   CONTAINER_ENGINE: docker
 
+# bash --noprofile --norc -eo pipefail {0}: a failing command in a pipeline fails the step.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   contract:
     name: Configuration contract
@@ -101,7 +106,7 @@ jobs:
             esac
           done < <(git ls-files -- 'docker/**' '*/docker/**' \
             ':!docker/tests/golden/*/expected/**' ':!docker/tests/parity/reference/**')
-          shellcheck --version | head -n 2
+          shellcheck --version | sed -n '1,2p'
           echo "${#scripts[@]} scripts"
           shellcheck -x --severity=warning "${scripts[@]}"
 
@@ -265,6 +270,7 @@ jobs:
           compression-level: 0
           retention-days: 1
           if-no-files-found: error
+          overwrite: true
 
   # The stack of docker-compose.yml on the runner's Docker Engine, with the images the jobs above
   # built (loaded from their artifacts: rebuilding them here would build again every image a pull
@@ -298,6 +304,7 @@ jobs:
           df -h /
 
       - name: Download the images
+        timeout-minutes: 15
         uses: actions/download-artifact@v4
         with:
           pattern: stack-image-*
@@ -306,6 +313,7 @@ jobs:
 
       - name: Load the images
         id: load
+        timeout-minutes: 15
         run: |
           for f in "$RUNNER_TEMP"/images/*.tar.gz; do
             gzip -dc "$f" | docker load -q
