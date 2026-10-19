@@ -13,16 +13,25 @@
 #   RuntimeMaxSec=<timeout>     timeout(1); SIGKILL if the command ignores SIGTERM
 #   WorkingDirectory=           the command runs in BBB_BLOCKNOTE_DIR (same default)
 #   UMask=0022                  umask 0022
-#   PrivateNetwork=true,        an unreachable HTTP(S) proxy (wkhtmltopdf uses the *_proxy
-#   IPAddressDeny=any           variables), so the HTML cannot make it fetch from other hosts.
-#                               Qt does not proxy loopback addresses: unlike on bare metal, the
-#                               command can still reach the server itself on 127.0.0.1:8787.
+#   PrivateNetwork=true,        no-network(1) of this image (docker/no-network.c): the command
+#   IPAddressDeny=any           and everything it starts cannot create sockets, so it reaches no
+#                               address, loopback included. It needs no privileges; if it cannot
+#                               set up the restriction, the command does not run.
+#   ReadWritePaths=, NoNewPrivileges=true
+#                               no-network --write BBB_BLOCKNOTE_DIR: where the kernel offers
+#                               Landlock, the command writes only there (and /dev/null) and cannot
+#                               trace or open the memory of processes outside its own; it runs
+#                               with no_new_privs
 #
 # MemoryHigh/MemoryMax need cgroups; the memory limit of the service applies instead (an
 # address-space limit, ulimit -v, makes wkhtmltopdf's WebKit crash at start). ProtectSystem,
-# ProtectHome, PrivateTmp, NoNewPrivileges and the mount syscall filter are covered by the
-# container: the image is root-owned, the service runs without privileges, and only /tmp and
-# the rendered config are writable.
+# ProtectHome and the mount syscall filter are covered by the container: the image is
+# root-owned, the service runs without privileges, and only /tmp and the rendered config are
+# writable.
+#
+#   PrivateTmp=true             a directory of its own per run below BBB_BLOCKNOTE_DIR (mode
+#                               0700), removed afterwards: TMPDIR, XDG_RUNTIME_DIR and
+#                               XDG_CACHE_HOME of the command
 
 set -euo pipefail
 
@@ -38,9 +47,14 @@ timeout_secs="$1"; shift
 cd "$BBB_BLOCKNOTE_DIR"
 umask 0022
 
-# Port 9 (discard) on loopback: nothing listens there, every proxied request fails at once.
-export http_proxy=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 \
-  HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9
-unset no_proxy NO_PROXY
+run_tmp="$(mktemp -d "${BBB_BLOCKNOTE_DIR%/}/.run-XXXXXXXX")"
+trap 'rm -rf -- "$run_tmp"' EXIT
+trap 'exit 143' TERM HUP
+trap 'exit 130' INT
+mkdir "$run_tmp/tmp" "$run_tmp/runtime" "$run_tmp/cache"
+chmod 0700 "$run_tmp/runtime"
 
-exec timeout --kill-after=10s "${timeout_secs}" "$@"
+status=0
+TMPDIR="$run_tmp/tmp" XDG_RUNTIME_DIR="$run_tmp/runtime" XDG_CACHE_HOME="$run_tmp/cache" \
+  no-network --write "$BBB_BLOCKNOTE_DIR" timeout --kill-after=10s "${timeout_secs}" "$@" || status=$?
+exit "$status"

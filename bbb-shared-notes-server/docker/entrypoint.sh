@@ -42,5 +42,31 @@ chmod 0600 "$dest"
 # 4. merge: none here. The server merges /etc/bigbluebutton/bbb-shared-notes-server.yml at
 # start, as on bare metal.
 
+# Wait for redis. The server connects its redis publisher once, when it starts
+# (src/redis/publisher.ts): started while redis is down, it keeps running without a publisher
+# (its subscriber reconnects), so shared notes are never created for new meetings.
+# `docker compose restart` restarts all services at once. redis as the server reads it:
+# redis.host/redis.port of default.yml, replaced by the Tier 3 file's if it sets them. Not in
+# render-only mode. If redis does not answer within the limit, exit: the restart policy starts
+# the container again.
+OVERRIDE=/etc/bigbluebutton/bbb-shared-notes-server.yml
+REDIS_WAIT_SECONDS=60
+if ! bbb_is_render_only && [ "${2:-}" = bbb-shared-notes-server.js ]; then
+    files=("$dest")
+    [ ! -r "$OVERRIDE" ] || files+=("$OVERRIDE")
+    # shellcheck disable=SC2016  # a yq expression, not a shell expansion
+    IFS="|" read -r redis_host redis_port <<<"$(yq ea '. as $f ireduce ({}; . * $f)
+        | (.redis.host // "") + "|" + ((.redis.port // "") | tostring)' "${files[@]}")"
+    [ -n "$redis_host" ] && [ -n "$redis_port" ] || bbb_die "cannot read redis.host/redis.port"
+    deadline=$((SECONDS + REDIS_WAIT_SECONDS))
+    # shellcheck disable=SC2016  # expanded by the inner bash
+    until { timeout 2 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$redis_host" "$redis_port"; } 2>/dev/null; do
+        [ "$SECONDS" -lt "$deadline" ] \
+            || bbb_die "redis ($redis_host:$redis_port) not reachable after ${REDIS_WAIT_SECONDS}s"
+        [ -n "${waiting:-}" ] || { bbb_log "waiting for redis ($redis_host:$redis_port)"; waiting=1; }
+        sleep 1
+    done
+fi
+
 # 5. exec
 bbb_exec "$@"
