@@ -23,7 +23,8 @@ monitoring are not part of the container stack yet.
 BigBlueButton can run as a set of containers with Docker Compose instead of the packages
 installed by `bbb-install.sh`. One static `docker-compose.yml` at the root of the repository
 starts all services. The images configure themselves at start from the variables in `.env`,
-so you never edit files inside the containers.
+so you never edit files inside the containers. Why the stack is built this way is explained in
+[Docker Compose design](/administration/docker-design).
 
 ## Before you install
 
