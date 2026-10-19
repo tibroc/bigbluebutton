@@ -5,7 +5,7 @@ location /graphql {
 	proxy_set_header Connection "Upgrade";
 	proxy_set_header Host $host;
 	#proxy_pass         http://127.0.0.1:8085; #Hasura (it requires to change the location to /v1/graphql)
-	proxy_pass         http://graphql-middleware:8378; #Graphql Middleware
+	proxy_pass         http://graphql-middleware; #Graphql Middleware
 }
 
 #Set cache system for meeting static data
@@ -30,7 +30,7 @@ location /api/rest/meetingStaticData {
     proxy_send_timeout 15s;        # max time to send the request to Hasura
     proxy_read_timeout 30s;        # max time to wait for Hasura’s response
     proxy_set_header Host $host;
-    proxy_pass http://graphql-server:8085; #Hasura
+    proxy_pass http://graphql-server; #Hasura
 }
 
 location /api/rest/userMetadata {
@@ -40,5 +40,5 @@ location /api/rest/userMetadata {
     proxy_http_version 1.1;
     proxy_set_header Connection "";
     proxy_set_header Host $host;
-    proxy_pass http://graphql-server:8085; #Hasura
+    proxy_pass http://graphql-server; #Hasura
 }

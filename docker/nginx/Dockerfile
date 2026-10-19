@@ -56,10 +56,15 @@ COPY --from=learning-dashboard --chmod=0644 learning-dashboard.nginx /usr/local/
 COPY --from=rap-presentation --chmod=0644 presentation.nginx /usr/local/share/bbb/nginx/fragments/
 COPY --chmod=0644 default-fe.nginx bbb-html5.nginx.static /usr/local/share/bbb/nginx/fragments/
 
-# Containers: the services are reached by their compose service names instead of 127.0.0.1
-# (docs: compose.md "Service names"). Hasura's REST endpoints go to graphql-server directly,
-# without the local load balancer on 127.0.0.1:8185 (hasura-loadbalancer.conf is not shipped:
-# replicas sit behind one service name). The build fails if a local upstream is left.
+# The upstream groups of the services, one per compose service name, re-resolved at run time
+# (bbb-upstreams.conf). Kubernetes mounts its own file here.
+COPY --chmod=0644 bbb-upstreams.conf /etc/nginx/conf.d/bbb-upstreams.conf
+
+# Containers: the services are reached through those upstream groups instead of 127.0.0.1:<port>
+# (docs: compose.md "Service names"); `proxy_pass http://<group>` keeps the rest of each URI as
+# before. Hasura's REST endpoints go to graphql-server directly, without the local load balancer
+# on 127.0.0.1:8185 (hasura-loadbalancer.conf is not shipped: replicas sit behind one service
+# name). The build fails if a local upstream is left or a proxy_pass names no group.
 # The learning dashboard app comes from its own image (service learning-dashboard, port 8080),
 # not from the bbb-data volume (ADR-09): the prefix location proxies to it, and a nested regex
 # location serves only the JSON file bbb-web writes per meeting
@@ -68,27 +73,33 @@ COPY --chmod=0644 default-fe.nginx bbb-html5.nginx.static /usr/local/share/bbb/n
 WORKDIR /usr/local/share/bbb/nginx/fragments
 # SC2016: `$1` is nginx's regex capture, written literally.
 # hadolint ignore=SC2016
-RUN sed -i 's|http://127\.0\.0\.1:8090|http://bbb-web:8090|g' web bbb-shared-notes-server.nginx \
-    && sed -i 's|http://localhost:8787/|http://shared-notes:8787/|g' bbb-shared-notes-server.nginx \
-    && sed -i -e 's|http://127\.0\.0\.1:8378;|http://graphql-middleware:8378;|g' \
-              -e 's|http://127\.0\.0\.1:8185;|http://graphql-server:8085;|g' graphql.nginx \
-    && sed -i 's|http://127\.0\.0\.1:7880/;|http://livekit:7880/;|g' livekit.nginx \
-    && sed -i 's|http://127\.0\.0\.1:3008;|http://bbb-webrtc-sfu:3008;|g' webrtc-sfu.nginx \
-    && sed -i 's|http://127\.0\.0\.1:3005;|http://webhooks:3005;|g' webhooks.nginx \
+RUN sed -i 's|http://127\.0\.0\.1:8090|http://bbb-web|g' web bbb-shared-notes-server.nginx \
+    && sed -i 's|http://localhost:8787/|http://shared-notes/|g' bbb-shared-notes-server.nginx \
+    && sed -i -e 's|http://127\.0\.0\.1:8378;|http://graphql-middleware;|g' \
+              -e 's|http://127\.0\.0\.1:8185;|http://graphql-server;|g' graphql.nginx \
+    && sed -i 's|http://127\.0\.0\.1:7880/;|http://livekit/;|g' livekit.nginx \
+    && sed -i 's|http://127\.0\.0\.1:3008;|http://bbb-webrtc-sfu;|g' webrtc-sfu.nginx \
+    && sed -i 's|http://127\.0\.0\.1:3005;|http://webhooks;|g' webhooks.nginx \
     && printf '%s\r\n' '' \
          '    location ~ "^/learning-analytics-dashboard/([^/]+/[^/]+/learning_dashboard_data\.json)$" {' \
          '        alias /var/bigbluebutton/learning-dashboard/$1;' \
          '    }' >/tmp/learning-dashboard-data.nginx \
-    && sed -i -e 's|^    alias /var/bigbluebutton/learning-dashboard/;|    proxy_pass http://learning-dashboard:8080;|' \
+    && sed -i -e 's|^    alias /var/bigbluebutton/learning-dashboard/;|    proxy_pass http://learning-dashboard;|' \
               -e '/^    autoindex off;/r /tmp/learning-dashboard-data.nginx' learning-dashboard.nginx \
     && rm /tmp/learning-dashboard-data.nginx \
-    && if ! grep -q '^    proxy_pass http://learning-dashboard:8080;' learning-dashboard.nginx \
+    && if ! grep -q '^    proxy_pass http://learning-dashboard;' learning-dashboard.nginx \
          || ! grep -q 'learning_dashboard_data' learning-dashboard.nginx; then \
          echo "learning-dashboard.nginx: upstream fragment changed, edit not applied" >&2; exit 1; \
        fi \
     && if grep -nE '^[[:space:]]*proxy_pass[[:space:]]+https?://(127\.0\.0\.1|localhost)[:/]' ./*; then \
          echo "local upstream left in a fragment" >&2; exit 1; \
-       fi
+       fi \
+    && sed -n 's/^upstream \([a-z0-9-]*\) {$/\1/p' /etc/nginx/conf.d/bbb-upstreams.conf >/tmp/groups \
+    && sed -nE 's|^[[:space:]]*proxy_pass[[:space:]]+http://([^/;$]*).*|\1|p' ./* >/tmp/hosts \
+    && if grep -vxF -f /tmp/groups /tmp/hosts; then \
+         echo "proxy_pass to a host that is not an upstream group of bbb-upstreams.conf" >&2; exit 1; \
+       fi \
+    && rm /tmp/groups /tmp/hosts
 WORKDIR /
 
 # Shipped unchanged at the bare-metal paths: include_default.nginx (bbb-config), the Hasura
