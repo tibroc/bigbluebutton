@@ -131,6 +131,28 @@ async function run() {
     ok(step, `HTTP 200 (attempt ${attempts}) meetingId=${meeting.meetingId ?? '?'} name=${JSON.stringify(meeting.name ?? '?')}`);
     const settings = meeting.clientSettings.clientSettingsJson;
 
+    // The client files as the browser loads them, from the html5 client image (service html5)
+    // through nginx: index.html and its bundle precompressed (gzip_static, bbb-html5.nginx.static),
+    // and the build identifier as cache buster (?v=, build/packages-template/bbb-html5/build.sh:72)
+    // equal to the one in the settings that akka-apps hands out.
+    step = 'html5client-assets';
+    const gzip = { 'Accept-Encoding': 'gzip' };
+    res = await get(new URL('/html5client/', base), gzip);
+    const indexHtml = await res.text();
+    if (res.status !== 200) fail(`GET /html5client/ HTTP ${res.status}`);
+    if (res.headers.get('content-encoding') !== 'gzip') fail(`GET /html5client/: Content-Encoding ${res.headers.get('content-encoding')}, expected gzip`);
+    const build = settings?.public?.app?.html5ClientBuild;
+    if (build === undefined || !indexHtml.includes(`?v=${build}`)) fail(`index.html has no ?v=${build} (html5ClientBuild of the settings)`);
+    // index.html loads 'bundle.' + bundleHash + '.js' (bigbluebutton-html5/client/main.html:274-282).
+    const bundleHash = (indexHtml.match(/var bundleHash = '([a-f0-9]+)';/) || [])[1];
+    if (!bundleHash) fail('index.html sets no bundleHash');
+    const bundle = `bundle.${bundleHash}.js`;
+    res = await get(new URL(`/html5client/${bundle}`, base), gzip);
+    const bundleBytes = (await res.arrayBuffer()).byteLength;
+    if (res.status !== 200) fail(`GET /html5client/${bundle} HTTP ${res.status}`);
+    if (res.headers.get('content-encoding') !== 'gzip') fail(`GET /html5client/${bundle}: Content-Encoding ${res.headers.get('content-encoding')}, expected gzip`);
+    ok(step, `index.html and ${bundle} (${bundleBytes} bytes) gzip, ?v=${build}`);
+
     // 4. connection-manager (bigbluebutton-html5/imports/ui/components/connection-manager/component.tsx:228-289):
     // graphql-ws client on graphqlWebsocketUrl, connection_init with these headers.
     step = 'graphql-ws';
@@ -154,6 +176,56 @@ async function run() {
       { authToken, clientType: 'HTML5', clientIsMobile: false });
     user = (await ws.next(userSub, (d) => d?.user_current?.[0]?.joined && d.user_current[0].presenter)).user_current[0];
     ok(step, `joined=${user.joined} presenter=${user.presenter}`);
+
+    // The learning dashboard as a moderator opens it (bigbluebutton-html5/imports/ui/components/
+    // learning-dashboard/service.js): the app from the learning-dashboard image, and the meeting's
+    // data, which akka-apps reports every 5 s (LearningDashboardActor.scala:158) and bbb-web
+    // writes to bbb-data as <meetingId>/<token>/learning_dashboard_data.json
+    // (LearningDashboardService.java), served by nginx from the volume (docker/nginx/Dockerfile).
+    // The token comes from the query the client runs (meeting-ended/queries.ts).
+    step = 'learning-dashboard';
+    const ldBase = `${settings?.public?.app?.learningDashboardBase ?? '/learning-analytics-dashboard'}/`;
+    res = await get(new URL(`${ldBase}?meeting=${encodeURIComponent(meeting.meetingId)}&lang=en`, base));
+    const ldIndex = await res.text();
+    if (res.status !== 200 || !ldIndex.includes('<title>Learning Dashboard</title>')) fail(`GET ${ldBase} HTTP ${res.status}, expected the dashboard app`);
+    const ldSub = ws.subscribe('getMeetingEndData',
+      'query getMeetingEndData { user_current { meeting { learningDashboard { learningDashboardAccessToken } } } }',
+      {}, { repeatMs: 1000 });
+    const ldToken = (await ws.next(ldSub, (d) => d?.user_current?.[0]?.meeting?.learningDashboard?.learningDashboardAccessToken))
+      .user_current[0].meeting.learningDashboard.learningDashboardAccessToken;
+    ws.stop(ldSub);
+    const ldDir = `${ldBase}${encodeURIComponent(meeting.meetingId)}/${encodeURIComponent(ldToken)}/`;
+    const ldUntil = Date.now() + 30_000;
+    let ldData;
+    let ldType;
+    for (;;) {
+      res = await get(new URL(`${ldDir}learning_dashboard_data.json`, base));
+      const text = await res.text();
+      if (res.status === 200) {
+        ldType = res.headers.get('content-type');
+        try { ldData = JSON.parse(text); } catch { fail(`learning_dashboard_data.json is not JSON: ${text.slice(0, 100)}`); }
+        break;
+      }
+      if (res.status !== 404 || Date.now() > ldUntil) fail(`GET <meeting>/<token>/learning_dashboard_data.json HTTP ${res.status}`);
+      await new Promise((r) => { setTimeout(r, 1000); });
+    }
+    if (ldData?.intId !== meeting.meetingId) fail(`learning_dashboard_data.json is for meeting ${ldData?.intId}`);
+    if (ldType !== 'application/json') fail(`learning_dashboard_data.json: Content-Type ${ldType}`);
+    // Nothing else below the prefix comes from the volume, and no path leaves it.
+    const probes = [
+      `${ldDir}`, `${ldDir}x.json`, `${ldDir}sub/learning_dashboard_data.json`,
+      `${ldBase}${encodeURIComponent(meeting.meetingId)}/`, `${ldBase}learning_dashboard_data.json`,
+      `${ldBase}${encodeURIComponent(meeting.meetingId)}/..%2F..%2F${encodeURIComponent(meeting.meetingId)}/${encodeURIComponent(ldToken)}/learning_dashboard_data.json`,
+      `${ldBase}..%2F..%2F..%2Fetc%2Fpasswd`,
+    ];
+    for (const probe of probes) {
+      res = await get(new URL(probe, base));
+      const text = await res.text();
+      if ((res.status !== 404 && res.status !== 400) || text.includes(meeting.meetingId)) {
+        fail(`GET ${redact(probe.replace(ldToken, '<token>'))} HTTP ${res.status}, expected 404 or 400`);
+      }
+    }
+    ok(step, `app 200, <meeting>/<token>/learning_dashboard_data.json 200 (${ldType}), ${probes.length} other paths 404/400`);
 
     // 7. The presentation list of the uploader (bigbluebutton-html5/imports/ui/components/
     // whiteboard/queries.ts, PRESENTATIONS_SUBSCRIPTION). bbb-web downloads the default

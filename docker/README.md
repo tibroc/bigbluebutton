@@ -263,9 +263,11 @@ certbot is scaled to 0, so no ACME request is made). In its place, `up` issues a
 the CA of its certificate. Its ports are published inside the Engine container only.
 `join-path.sh` does what the html5 client does when a user joins: API create and join, the
 redirect to the client with the session token, `/api/rest/meetingStaticData` (Hasura,
-authenticated through akka-apps), the GraphQL WebSocket through graphql-middleware, the join
-mutation, the default presentation converted (bbb-web loads it from
-`https://bbb.example.com/default.pdf` through haproxy), a two-page PDF uploaded as the
+authenticated through akka-apps), the client's `index.html` and bundle (precompressed, with the
+build identifier of the settings as cache buster), the GraphQL WebSocket through
+graphql-middleware, the join mutation, the learning dashboard (the app, the meeting's data file
+from `bbb-data`, and 404 for other paths below it), the default presentation converted (bbb-web
+loads it from `https://bbb.example.com/default.pdf` through haproxy), a two-page PDF uploaded as the
 presentation uploader does and converted, and the LiveKit signaling URL. Then it runs `docker
 compose restart`, as a second cycle recreates the redis container alone (with a fixed address,
 `BBB_REDIS_IP`, it keeps its address; see below), and as a third cycle restarts every service while

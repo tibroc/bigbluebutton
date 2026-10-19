@@ -21,8 +21,8 @@
 # JOIN_PATH_DEBUG=1 prints the GraphQL WebSocket messages the client receives (stderr).
 #
 # Steps: stack-healthy, then the client steps of join-path-client.mjs (api-index, create, join,
-# html5client, meetingStaticData, graphql-ws, user-join, default-presentation,
-# upload-presentation, livekit); then restart (`docker compose restart`),
+# html5client, meetingStaticData, html5client-assets, graphql-ws, user-join, learning-dashboard,
+# default-presentation, upload-presentation, livekit); then restart (`docker compose restart`),
 # stack-healthy-after-restart, nginx restarted as docker/README.md requires, and the client
 # steps again; then restart-redis (the redis container recreated alone, with a new address
 # unless its address is fixed), stack-healthy-after-redis, nginx restarted, and the client
