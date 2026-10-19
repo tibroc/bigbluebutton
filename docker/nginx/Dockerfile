@@ -1,13 +1,13 @@
-# nginx: BigBlueButton's web server. Serves the html5 client, the landing page and the ACME
-# webroot, and carries the location fragments of the packages (/usr/share/bigbluebutton/nginx/).
+# nginx: BigBlueButton's web server. Serves the landing page, the ACME webroot and the learning
+# dashboard app, and carries the location fragments of the packages
+# (/usr/share/bigbluebutton/nginx/), which proxy to the services, among them the html5 client (its
+# own image, compose service `html5`).
 # haproxy terminates TLS and sends HTTP to port 81 with the PROXY protocol (ADR-07); port 80 is
 # published for ACME and the redirect to HTTPS.
 #
-# Build with bake (docker/bake/nginx.hcl) or with podman, after building the html5 client
-# (docker/bake/html5-client.hcl, bigbluebutton-html5/Dockerfile) and the learning dashboard
+# Build with bake (docker/bake/nginx.hcl) or with podman, after building the learning dashboard
 # (docker/bake/learning-dashboard.hcl, bbb-learning-dashboard/Dockerfile):
 #   podman build --build-context entrypoint-lib=docker/lib \
-#     --build-context html5-client=container-image://localhost/bbb-html5-client:golden \
 #     --build-context packages=build/packages-template \
 #     --build-context bigbluebutton-web=bigbluebutton-web \
 #     --build-context learning-dashboard=container-image://localhost/bbb-learning-dashboard:golden \
@@ -33,13 +33,14 @@ RUN apk add --no-cache bash gettext-envsubst \
 
 # Location fragments, under the names the packages install them with (the build.sh of each
 # package; bbb-web's fragment is `web`). default-fe.nginx is written by bbb-install.
+# bbb-html5.nginx.static is this image's: the package's static locations are served by the html5
+# client image, and this one proxies them there.
 # DL3022: these are named build contexts, not stages.
 # hadolint ignore=DL3022
 COPY --from=packages --chmod=0644 \
      bbb-config/plugins-assets-cors.nginx \
      bbb-graphql-middleware/graphql.nginx \
      bbb-html5/bbb-html5.nginx \
-     bbb-html5/bbb-html5.nginx.static \
      bbb-livekit/livekit.nginx \
      bbb-playback/playback.nginx \
      bbb-shared-notes-server/bbb-shared-notes-server.nginx \
@@ -56,7 +57,7 @@ COPY --from=learning-dashboard --chmod=0644 /usr/share/bigbluebutton/nginx/learn
      /usr/local/share/bbb/nginx/fragments/
 # hadolint ignore=DL3022
 COPY --from=rap-presentation --chmod=0644 presentation.nginx /usr/local/share/bbb/nginx/fragments/
-COPY --chmod=0644 default-fe.nginx /usr/local/share/bbb/nginx/fragments/
+COPY --chmod=0644 default-fe.nginx bbb-html5.nginx.static /usr/local/share/bbb/nginx/fragments/
 
 # Containers: the services are reached by their compose service names instead of 127.0.0.1
 # (docs: compose.md "Service names"). Hasura's REST endpoints go to graphql-server directly,
@@ -93,18 +94,15 @@ RUN sed -i 's|http://127\.0\.0\.1:8090|http://bbb-web:8090|g' web bbb-shared-not
 WORKDIR /
 
 # Shipped unchanged at the bare-metal paths: include_default.nginx (bbb-config), the Hasura
-# settings cache zone (bbb-graphql-middleware), the landing page assets (bbb-config) and the
-# html5 client (bbb-html5). The learning dashboard app (bbb-learning-dashboard) goes next to the
-# html5 client: its bare-metal path /var/bigbluebutton/learning-dashboard is on the bbb-data
-# volume here.
+# settings cache zone (bbb-graphql-middleware) and the landing page assets (bbb-config). The
+# learning dashboard app (bbb-learning-dashboard) goes to /usr/share/bigbluebutton: its bare-metal
+# path /var/bigbluebutton/learning-dashboard is on the bbb-data volume here.
 # hadolint ignore=DL3022
 COPY --from=packages --chmod=0644 bbb-config/include_default.nginx /usr/share/bigbluebutton/include_default.nginx
 # hadolint ignore=DL3022
 COPY --from=packages --chmod=0644 bbb-graphql-middleware/bbb-graphql-client-settings-cache.conf /etc/nginx/conf.d/
 # hadolint ignore=DL3022
 COPY --from=bigbluebutton-config assets /var/www/bigbluebutton-default/assets
-# hadolint ignore=DL3022
-COPY --from=html5-client /usr/share/bigbluebutton/html5-client /usr/share/bigbluebutton/html5-client
 # hadolint ignore=DL3022
 COPY --from=learning-dashboard /usr/share/bigbluebutton/learning-dashboard /usr/share/bigbluebutton/learning-dashboard
 COPY --chmod=0644 nginx.conf /etc/nginx/nginx.conf

@@ -72,9 +72,9 @@ services:
       start_period: 120s
       retries: 3
 
-  # Web server: html5 client, landing page, ACME webroot, API and websocket routes. nginx
-  # resolves the upstream service names once, at start: restart it after an upstream container
-  # was recreated (docker/README.md).
+  # Web server: landing page, ACME webroot, learning dashboard and the routes to the services
+  # (API, websockets, the html5 client). nginx resolves the upstream service names once, at
+  # start: restart it after an upstream container was recreated (docker/README.md).
   nginx:
     image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-nginx:${BBB_IMAGE_TAG:-4.0.1}
     restart: unless-stopped
@@ -109,12 +109,30 @@ services:
         condition: service_healthy
       bbb-webrtc-sfu:
         condition: service_healthy
+      html5:
+        condition: service_healthy
       # Only with the webhooks feature (profile); nginx then proxies /bigbluebutton/api/hooks to it.
       webhooks:
         condition: service_healthy
         required: false
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "--haproxy-protocol", "http://127.0.0.1:81/bigbluebutton/rtt-check"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  # The html5 client (static files, port 8080); nginx proxies /html5client to it.
+  html5:
+    image: ${BBB_IMAGE_REGISTRY:-ghcr.io/bigbluebutton}/bbb-html5-client:${BBB_IMAGE_TAG:-4.0.1}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - bbb
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/html5client/"]
       interval: 30s
       timeout: 5s
       start_period: 10s

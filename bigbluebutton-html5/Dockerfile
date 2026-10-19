@@ -1,8 +1,12 @@
-# html5 client: the static build of the bbb-html5 package. Not a service: the result holds only
-# /usr/share/bigbluebutton/html5-client, which the nginx image (docker/nginx) copies and serves.
+# html5 client: the static build of the bbb-html5 package, served by nginx on port 8080 with the
+# package's own locations (bbb-html5.nginx, bbb-html5.nginx.static). The edge nginx
+# (docker/nginx) proxies /html5client to it (compose service `html5`). akka-apps and bbb-web take
+# the build's settings.yml from this image (docker/bake/apps-akka.hcl, web.hcl).
 #
 # Build with bake (docker/bake/html5-client.hcl) or with podman:
-#   podman build --build-context bbb-config=bigbluebutton-config bigbluebutton-html5
+#   podman build --build-context bbb-config=bigbluebutton-config \
+#     --build-context packages=build/packages-template \
+#     --build-context entrypoint-lib=docker/lib bigbluebutton-html5
 #
 # Steps as in build/packages-template/bbb-html5/build.sh and after-install.sh; see the
 # comments below for the lines each step follows.
@@ -77,5 +81,40 @@ RUN CLIENT_BUILD="${COMMIT_DATE:-$((BUILD))}" \
        fi \
     && chmod -R a+rX,go-w /src/dist
 
-FROM scratch
+# nginx:1.30.6-alpine (stable-alpine), the base of the edge nginx (docker/nginx)
+FROM docker.io/library/nginx@sha256:970364228b1e4f932abc22d321932816782cca8a20b85a77552a7cfe9acfb3b5
+
+# bash for the entrypoint helper; curl (healthcheck) is part of the base image. The base image's
+# default site is replaced by this image's server. nginx.conf: no user switch (the master runs as
+# the container's non-root UID) and the pid file in /tmp; the build fails if the base image's
+# lines changed.
+RUN apk add --no-cache bash \
+    && rm -f /etc/nginx/conf.d/default.conf \
+    && sed -i -e '/^user  nginx;$/d' -e 's|^pid        /run/nginx\.pid;$|pid        /tmp/nginx.pid;|' \
+        /etc/nginx/nginx.conf \
+    && if grep -q '^user' /etc/nginx/nginx.conf || ! grep -q '^pid        /tmp/nginx\.pid;$' /etc/nginx/nginx.conf; then \
+         echo "nginx.conf of the base image changed, edit not applied" >&2; exit 1; \
+       fi \
+    && install -d -m 0755 /usr/share/bigbluebutton/nginx /usr/local/lib/bbb
+
+# The package's location fragments at the paths it installs them to (build.sh), unchanged.
+# bbb-html5.nginx.dev (a proxy to a local development server) is not shipped.
+# DL3022: packages is a named build context (./build/packages-template), not a stage.
+# hadolint ignore=DL3022
+COPY --from=packages --chmod=0644 bbb-html5/bbb-html5.nginx bbb-html5/bbb-html5.nginx.static \
+     /usr/share/bigbluebutton/nginx/
+COPY --chmod=0644 docker/html5-client.conf /etc/nginx/conf.d/html5-client.conf
 COPY --from=build /src/dist /usr/share/bigbluebutton/html5-client
+
+# Shared entrypoint helper (P3).
+# hadolint ignore=DL3022
+COPY --from=entrypoint-lib --chmod=0644 entrypoint-lib.sh /usr/local/lib/bbb/entrypoint-lib.sh
+COPY --chmod=0755 docker/entrypoint.sh /entrypoint.sh
+
+# The base image's nginx UID; any other non-root UID works too (docker/README.md).
+USER 101:101
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/html5client/"]
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["nginx", "-g", "daemon off;"]

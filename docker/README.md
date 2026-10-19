@@ -39,8 +39,8 @@ repository root and merges its services into the definition
 
 The bake variable `COMMIT_DATE` is the html5 client's build identifier: `html5ClientBuild` in
 its `settings.yml` and the `?v=` cache buster of `index.html` and `fonts.css`, as upstream's
-package build sets it (`build/packages-template/bbb-html5/build.sh`). nginx, akka-apps and
-bbb-web all ship the client build's `settings.yml`, so they carry the same value. CI sets the
+package build sets it (`build/packages-template/bbb-html5/build.sh`). The html5 client image,
+akka-apps and bbb-web all ship the client build's `settings.yml`, so they carry the same value. CI sets the
 commit date in upstream's form; empty (the default) gives `0`, the value of the golden tests.
 For a build that you deploy, set it, so that browsers load the new client after an upgrade:
 
@@ -79,7 +79,7 @@ the same way, with the bake variables `BBB_IMAGE_REGISTRY` (default `localhost`)
 | `web` | `bbb-web` | `bbb-web` |
 | `webhooks` | `bbb-webhooks` | `webhooks` (profile `webhooks`) |
 | `record-and-playback` | `bbb-record-and-playback` | not in the skeleton yet |
-| `html5-client` | `bbb-html5-client` | none: build stage of `nginx`, `apps-akka` and `web` (its `settings.yml`) |
+| `html5-client` | `bbb-html5-client` | `html5` (also a build stage of `apps-akka` and `web`: its `settings.yml`) |
 | `learning-dashboard` | `bbb-learning-dashboard` | none: build stage of `nginx` |
 
 `bbb-common-message`, `bbb-common-web` and `_java-base` are build stages and get no tag.
@@ -152,8 +152,8 @@ each service receives only the variables it reads. The images validate them at s
 with a message naming a missing or malformed variable.
 
 - **Walking skeleton.** The file has the services of the skeleton: haproxy, certbot, nginx,
-  bbb-web, akka-apps, graphql-server, graphql-middleware, graphql-actions, shared-notes,
-  export-annotations, redis, postgres, db-init (a job that exits after setting up the
+  html5 (the html5 client), bbb-web, akka-apps, graphql-server,
+  graphql-middleware, graphql-actions, shared-notes, export-annotations, redis, postgres, db-init (a job that exits after setting up the
   databases), livekit, bbb-webrtc-sfu and coturn, and the optional webhooks (profile
   `webhooks`, below). Recording, office conversion, greenlight, monitoring, setup and preflight
   follow; until then use `BBB_FEATURES=recording`, `BBB_FEATURES=webhooks`, both, or an empty
@@ -170,8 +170,8 @@ with a message naming a missing or malformed variable.
   names it proxies to once, at start, so it waits for all of them to be healthy. `docker
   compose up -d` recreates only the services whose configuration or image changed; if that
   included one of nginx's upstreams (bbb-web, shared-notes, graphql-server, graphql-middleware,
-  livekit, bbb-webrtc-sfu, webhooks), run `docker compose restart nginx` afterwards, or nginx answers 502
-  for it (or proxies to whichever container now has the old address). The same applies after
+  livekit, bbb-webrtc-sfu, html5, webhooks), run `docker compose restart
+  nginx` afterwards, or nginx answers 502 for it (or proxies to whichever container now has the old address). The same applies after
   `docker compose restart` and after an upstream restarted by itself: Docker Engine 29 gives
   restarted containers other addresses, and `docker compose restart` restarts all services at
   once, in no particular order. Restart nginx once the others are healthy.
@@ -246,7 +246,8 @@ of a browser:
 docker/tests/buildkit/build.sh --tag 4.0.1 haproxy certbot coturn livekit
 docker/tests/buildkit/build.sh --tag 4.0.1 postgres db-init graphql-middleware graphql-actions
 docker/tests/buildkit/build.sh --tag 4.0.1 graphql-server        # then apps-akka, web,
-                                                                 # shared-notes, bbb-webrtc-sfu, nginx
+                                                                 # shared-notes, bbb-webrtc-sfu, nginx,
+                                                                 # html5-client
 docker/tests/stack/dind.sh start     # Docker Engine in a privileged podman container
 docker/tests/stack/dind.sh load      # copies the images of docker-compose.yml from podman
 docker/tests/stack/dind.sh up        # test certificate, docker compose up -d --wait, no certbot
@@ -376,6 +377,6 @@ Dockerfiles, `docker-bake.hcl`, `docker-compose.yml` or the contract outputs, in
 | Image `bbb-<image>` (one per bake target, amd64) | build with BuildKit, tagged `localhost/bbb-<image>:golden` and loaded into Docker; `docker/tests/dirmodes/check.sh`; `docker/tests/golden/run-golden.sh --engine docker --parity` for the golden cases of that image; `docker/tests/uid/check.sh` with the fixture env of its golden case, a write probe for each tmpfs and each writable named volume of its service in `docker-compose.yml` (`--no-render` for images without a golden case) |
 
 `shellcheck.yml` (upstream) also checks every `*.sh` file of the repository at severity error.
-Images that are neither in `docker-compose.yml` nor in a golden case (the build stages
-`html5-client` and `learning-dashboard`, and record-and-playback until it joins the stack) get
-the directory-mode check only.
+Images that are neither in `docker-compose.yml` nor in a golden case (the build stage
+`learning-dashboard`, and record-and-playback until it joins the stack) get the directory-mode
+check only.

@@ -7,7 +7,6 @@ target "nginx" {
     platforms = compact(split(",", BBB_PLATFORMS))
     context = "./docker/nginx"
     contexts = {
-        html5-client = "target:html5-client"
         packages = "./build/packages-template"
         bigbluebutton-web = "./bigbluebutton-web"
         learning-dashboard = "target:learning-dashboard"
