@@ -57,11 +57,11 @@ deployments use their official images.
   caption publish script `caption/presentation` still logs to journald only).
   Services listen on all interfaces, on the bare-metal ports.
 - Configuration is mounted at the bare-metal path. Where an image takes environment variables
-  into its default config file (bbb-apps-akka, bbb-web, export-annotations), a mounted file
-  replaces that and the variables are not used.
+  into its default config file (bbb-apps-akka, export-annotations), a mounted file replaces that
+  and the variables are not used. bbb-web's environment variables override its mounted files.
 - The entrypoint is the process, started as in its systemd unit (nginx images: the base image's).
-  bbb-web and export-annotations have a few-line entrypoint that writes the variables below into
-  the config unless it is mounted. graphql-server uses Hasura's entrypoint, which applies the
+  export-annotations has a few-line entrypoint that writes the variables below into the config
+  unless it is mounted. graphql-server uses Hasura's entrypoint, which applies the
   metadata before the engine starts.
 - `/var/bigbluebutton` is shared between bbb-web, record-and-playback and nginx (presentations,
   recordings, captions, learning-dashboard reports). `/var/lib/bbb-webrtc-recorder` (recorder and
@@ -98,8 +98,9 @@ Only these are read; everything else is set in the mounted configuration.
 - **bbb-apps-akka** (HOCON `${?VAR}` in its default config): `SHARED_SECRET`, `BBB_WEB_API`,
   `GRAPHQL_MIDDLEWARE_API`, `REDIS_HOST`, `POSTGRES_HOST`, `POSTGRES_PASSWORD`; upstream's
   `INTERFACE` (set to `0.0.0.0`) and `PORT`; `JAVA_OPTS`.
-- **bbb-web** (written to `bbb-web.properties` only if that file does not exist): `SERVER_URL`,
-  `SHARED_SECRET`, `REDIS_HOST`; also `JDK_JAVA_OPTIONS` (heap) and `MALLOC_ARENA_MAX`.
+- **bbb-web**: any key of `bigbluebutton.properties`, upper case with `.` as `_` (or the key
+  itself), e.g. `BIGBLUEBUTTON_WEB_SERVERURL`, `SECURITYSALT`, `REDISHOST`; they override
+  `bbb-web.properties`. Also `JDK_JAVA_OPTIONS` (heap) and `MALLOC_ARENA_MAX`.
 - **bbb-graphql-actions**: `BBB_REDIS_HOST`, `BBB_REDIS_PORT`, `BBB_REDIS_PASSWORD`,
   `SERVER_HOST` (`0.0.0.0`), `SERVER_PORT`, `MAX_BODY_SIZE`.
 - **bbb-graphql-server**: Hasura's `HASURA_GRAPHQL_*`, with the package's defaults set in the image.
