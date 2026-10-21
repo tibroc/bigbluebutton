@@ -57,12 +57,12 @@ deployments use their official images.
   caption publish script `caption/presentation` still logs to journald only).
   Services listen on all interfaces, on the bare-metal ports.
 - Configuration is mounted at the bare-metal path. Where an image takes environment variables
-  into its default config file (bbb-apps-akka, bbb-web, export-annotations), a mounted file
-  replaces that and the variables are not used.
+  into its default config file (bbb-apps-akka, bbb-web), a mounted file replaces that and the
+  variables are not used.
 - The entrypoint is the process, started as in its systemd unit (nginx images: the base image's).
-  bbb-web and export-annotations have a few-line entrypoint that writes the variables below into
-  the config unless it is mounted. graphql-server uses Hasura's entrypoint, which applies the
-  metadata before the engine starts.
+  bbb-web has a few-line entrypoint that writes the variables below into the config unless it is
+  mounted. graphql-server uses Hasura's entrypoint, which applies the metadata before the engine
+  starts.
 - `/var/bigbluebutton` is shared between bbb-web, record-and-playback and nginx (presentations,
   recordings, captions, learning-dashboard reports). `/var/lib/bbb-webrtc-recorder` (recorder and
   record-and-playback) holds the recorded media; `/var/log/bigbluebutton` the recording logs.
@@ -107,8 +107,8 @@ Only these are read; everything else is set in the mounted configuration.
   `HASURA_GRAPHQL_AUTH_HOOK`, `HASURA_BBB_GRAPHQL_ACTIONS_ADAPTER_URL`. The image ships no admin
   secret: `HASURA_GRAPHQL_ADMIN_SECRET` is required, and Hasura refuses to start without it
   because the image sets the auth hook.
-- **bbb-export-annotations**: `BBB_REDIS_HOST`, `BBB_WEB_HOST`; the Redis password goes in a
-  mounted `settings.json`.
+- **bbb-export-annotations**: none; a deployment mounts
+  `/etc/bigbluebutton/bbb-export-annotations.json`.
 - **bbb-record-and-playback**: resque's `QUEUE` and `COUNT` (preset as in the systemd unit).
 - **bbb-webrtc-sfu**, **bbb-webhooks**: the variables in the component's
   `config/custom-environment-variables.yml` (node-config), e.g. `REDIS_HOST`, `REDIS_PASSWORD`;
