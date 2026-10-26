@@ -10,7 +10,7 @@ on:
       - "**/*.md"
       - "bigbluebutton-html5/public/locales/*.json"
   push:
-    branches: ["v[4-9].*.x-develop", "v[4-9].*.x-release"]
+    branches: ["v[4-9].*.x-develop", "v[4-9].*.x-release", "vm-test"]
     tags: ["v*"]
 
 concurrency:
@@ -21,9 +21,9 @@ permissions:
   contents: read
 
 env:
-  BBB_IMAGE_REGISTRY: ghcr.io/bigbluebutton/bigbluebutton
+  BBB_IMAGE_REGISTRY: ghcr.io/tibroc/bigbluebutton
   TAG: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || github.ref_name }}
-  PUSH: ${{ github.event_name != 'pull_request' && github.repository == 'bigbluebutton/bigbluebutton' }}
+  PUSH: ${{ github.event_name != 'pull_request' && github.repository == 'tibroc/bigbluebutton' }}
 
 jobs:
   targets:
@@ -88,7 +88,7 @@ jobs:
 
   merge:
     needs: [targets, build]
-    if: github.event_name != 'pull_request' && github.repository == 'bigbluebutton/bigbluebutton'
+    if: github.event_name != 'pull_request' && github.repository == 'tibroc/bigbluebutton'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
