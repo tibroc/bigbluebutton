@@ -285,3 +285,15 @@ services:
 ```
 
 Then `docker compose up -d web`.
+
+For the HTML5 client, `docker/compose/dev/html5.yml` runs the webpack dev server on
+`./bigbluebutton-html5`, as `bigbluebutton-html5/run-dev.sh` does: a changed source file is
+recompiled and reloaded in the browser without a restart. Add it in `.env`:
+
+```sh
+COMPOSE_FILE=docker-compose.yml:docker/compose/dev/html5.yml:docker-compose.override.yml
+```
+
+With `COMPOSE_FILE` set, compose reads `docker-compose.override.yml` only when it is listed (and
+then it must exist). The first start runs `npm ci` into a volume and compiles (about two minutes;
+until then `/html5client` answers 502).
